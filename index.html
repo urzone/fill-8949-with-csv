@@ -267,60 +267,159 @@
       const form = page.doc.catalog.lookup(PDFName.of('AcroForm'), PDFDict);
       const fields = form.lookup(PDFName.of('Fields'), PDFArray);
       const annotations = page.node.Annots();
-      for (let i = 0; i < annotations.size(); i++) {
-        const a = annotations.lookup(i, PDFDict);
-        a.set(PDFName.of('T'), PDFString.of(annotationIds.next().value));
-        fields.push(a);
+      if (annotations) { // Check if annotations exist
+        for (let i = 0; i < annotations.size(); i++) {
+          const a = annotations.lookup(i, PDFDict);
+          // Only clone if it's likely a form field annotation (Widget type)
+          if (a.lookup(PDFName.Type) === PDFName.Annot && a.lookup(PDFName.Subtype) === PDFName.Widget) {
+              const clonedA = a.clone(page.doc.context); // Clone the annotation dictionary
+              clonedA.set(PDFName.of('T'), PDFString.of(annotationIds.next().value)); // Set unique T key
+              fields.push(clonedA); // Add the cloned annotation to the form fields array
+          }
+        }
       }
     };
 
-    async function generatePage(f8949, data, type) {
-      const [page] = type === 'short' ? await f8949.copyPages(f8949, [0]) : await f8949.copyPages(f8949, [1]);
-      cloneAnnotations(page);
+    async function generatePage(originalDoc, data, type) {
+      // Copy the correct template page (0 for short, 1 for long)
+      const [page] = type === 'short' ? await originalDoc.copyPages(originalDoc, [0]) : await originalDoc.copyPages(originalDoc, [1]);
+
+      // Clone the annotations from the original template page onto the new page instance
+      // This ensures the new page has the fields array populated correctly for filling
+       cloneAnnotations(page); // Corrected: Operate on the newly copied page
+
+      const form = originalDoc.getForm(); // Get the form object once
 
       let cellNumber = 0;
-      const offset = 5; // To skip to the table annotations
-      const annots = page.node.Annots();
-      for (const row of data) {
-        for (const cell of row) {
-          const a = annots.lookup(cellNumber + offset, PDFDict);
-          a.set(PDFName.of('V'), PDFString.of(cell));
-          cellNumber++;
+      const offset = 5; // Offset based on visual inspection/debugging (may need adjustment for different forms/years)
+      const fieldsOnPage = form.getFields().filter(field => field.acroField.getParent() === page.node.Annots()); // Attempt to get fields associated with this page, might not be direct in pdf-lib
+
+      // Get all fields associated with the AcroForm,
+      // We'll rely on the implicit order matching the visual layout and the cloned 'T' keys for *potential* future mapping,
+      // but primarily use index based filling as before after cloning.
+      // Note: pdf-lib might fill based on the /Fields array order added by cloneAnnotations.
+      const allFields = form.getFields();
+
+      // We need to find the indices in the main 'Fields' array that correspond to the *cloned* annotations
+       // for this specific page. This is tricky as pdf-lib doesn't maintain a direct page->field mapping post-cloning.
+       // The cloneAnnotations function adds the *cloned* annots to the end of the main /Fields array.
+       // If pages are generated sequentially, we might infer the field indices based on how many were added previously.
+       // Let's assume cloneAnnotations adds 14*8 (rows*cols) + some other fields per page? Needs verification.
+       // For simplicity, let's stick to the lookup-by-index-on-page-annotations approach, assuming pdf-lib maps V correctly upon save.
+
+      const annots = page.node.Annots(); // Get the annotations array *of the copied page*
+
+       if (annots) { // Ensure annotations exist on the copied page
+          let fieldIndexOnPage = 0; // Keep track of potential *widget* annotations on the page
+          for (let annotIndex = 0; annotIndex < annots.size(); annotIndex++) {
+                const annotDict = annots.lookup(annotIndex, PDFDict);
+                // Check if it's a Widget annotation (likely a field)
+                if (annotDict.lookup(PDFName.Subtype) === PDFName.Widget) {
+                  // We are looking for the specific table cells, assuming they start after an offset
+                  if(fieldIndexOnPage >= offset && cellNumber < data.length * data[0].length) { // Check we are within data bounds
+                    const rowIndex = Math.floor(cellNumber / data[0].length);
+                    const colIndex = cellNumber % data[0].length;
+                    if (rowIndex < data.length && colIndex < data[rowIndex].length) {
+                        const cellValue = data[rowIndex][colIndex];
+                        // Set the Value ('/V') directly on the annotation dictionary
+                        // PDFString.of() handles encoding correctly
+                       annotDict.set(PDFName.of('V'), PDFString.of(cellValue || '')); // Use empty string if cell is null/undefined
+                       annotDict.set(PDFName.of('AP'), null); // Remove existing appearance stream, pdf-lib will generate on save/flatten
+                     }
+                    cellNumber++;
+                  }
+                  fieldIndexOnPage++; // Increment only for widget annotations
+               }
+            }
         }
-      }
 
       return page;
     }
 
     async function generate8949(f8949Bytes, year, shortData, longData) {
-      const f8949 = await PDFDocument.load(f8949Bytes);
-      const pagePromises = [];
-      const chunkSize = 14;
+      // Load the original IRS Form 8949 PDF bytes
+      const f8949 = await PDFDocument.load(f8949Bytes, {
+           updateMetadata: false, // May help prevent issues with metadata conflicts
+      });
+      const pagePromises = []; // To hold promises for generated pages
+      const chunkSize = 14; // Number of transaction rows per PDF page
+
+       // Initialize AcroForm Fields if not present (might be needed if original is pure XFA)
+       // This part might require more checks depending on the source PDF structure
+       const catalog = f8949.catalog;
+       let acroForm = catalog.lookup(PDFName.of('AcroForm'), PDFDict);
+       if (!acroForm) {
+           acroForm = f8949.context.obj({ Type: 'AcroForm', Fields: [] });
+           catalog.set(PDFName.of('AcroForm'), acroForm);
+        } else if (!acroForm.has(PDFName.of('Fields'))) {
+           acroForm.set(PDFName.of('Fields'), f8949.context.obj([]));
+       }
+
+      // Generate pages for short-term transactions
       for (let i = 0; i < shortData.length; i += chunkSize) {
-        const chunk = shortData.slice(i, i + chunkSize);
+        const chunk = shortData.slice(i, i + chunkSize); // Get a chunk of 14 rows
+        // Generate a page for this chunk, copying the short-term template (page 0)
         pagePromises.push(generatePage(f8949, chunk, 'short'));
       }
-      if (shortData.length === 0) { // Push a blank page
-        pagePromises.push(f8949.copyPages(f8949, [0]).then(p => p[0]));
+      // If there are no short-term transactions, add a blank short-term page by copying
+      if (shortData.length === 0) {
+        const [blankShortPage] = await f8949.copyPages(f8949, [0]);
+         cloneAnnotations(blankShortPage); // Clone annotations even for blank pages for consistency
+        pagePromises.push(Promise.resolve(blankShortPage)); // Resolve promise immediately
       }
+
+      // Generate pages for long-term transactions
       for (let i = 0; i < longData.length; i += chunkSize) {
-        const chunk = longData.slice(i, i + chunkSize);
+        const chunk = longData.slice(i, i + chunkSize); // Get a chunk of 14 rows
+        // Generate a page for this chunk, copying the long-term template (page 1)
         pagePromises.push(generatePage(f8949, chunk, 'long'));
       }
-      if (longData.length === 0) { // Push a blank page
-        pagePromises.push(f8949.copyPages(f8949, [1]).then(p => p[0]));
+      // If there are no long-term transactions, add a blank long-term page by copying
+      if (longData.length === 0) {
+         const [blankLongPage] = await f8949.copyPages(f8949, [1]);
+         cloneAnnotations(blankLongPage); // Clone annotations even for blank pages
+         pagePromises.push(Promise.resolve(blankLongPage)); // Resolve promise immediately
       }
+
+      // Wait for all page generation promises to resolve
       const pages = await Promise.all(pagePromises);
 
+       // Add all the newly generated (and filled) pages to the document *before* removing old ones
       for (const page of pages) {
         f8949.addPage(page);
       }
 
-      // Remove the original 2 pages of the PDF
+      // Remove the original 2 template pages from the PDF
+      // Important: Remove pages *after* adding new ones and potentially cloning resources they need.
       f8949.removePage(0);
-      f8949.removePage(0);
+      f8949.removePage(0); // Remove the first page again, as indices shift after the first removal
 
-      return f8949.save().then(data => new File([data.buffer], `f8949_${year}_filled`, { type: 'application/pdf' }));
+      // --- Modification Start ---
+      // Get the PDF's form object
+      const form = f8949.getForm();
+
+       // Attempt to update appearance streams before flattening
+       try {
+           form.updateFieldAppearances();
+       } catch (e) {
+           console.warn("Could not update field appearances, flattening might use default appearances.", e);
+       }
+
+      // Flatten the form fields, making them static content and removing XFA/AcroForm structures
+      try {
+        form.flatten();
+      } catch (e) {
+         console.error("Error during form flattening:", e);
+         // Decide how to handle: maybe alert user, maybe save unflattened?
+         // Saving unflattened as fallback:
+         // return f8949.save({ useObjectStreams: false }).then(data => new File([data.buffer], `f8949_${year}_filled_unflattened.pdf`, { type: 'application/pdf' }));
+         throw new Error("Failed to flatten PDF form."); // Or re-throw error
+      }
+      // --- Modification End ---
+
+      // Save the modified PDF document into bytes
+      // Using useObjectStreams: false can sometimes improve compatibility
+      return f8949.save({ useObjectStreams: false }).then(data => new File([data.buffer], `f8949_${year}_filled.pdf`, { type: 'application/pdf' }));
     }
 
     function download(file) {
@@ -328,6 +427,7 @@
       a.href = URL.createObjectURL(file);
       a.download = file.name;
       a.click();
+      URL.revokeObjectURL(a.href); // Clean up the object URL
     }
 
     async function parseCsv(file, hasHeaders) {
@@ -341,7 +441,7 @@
       });
 
       const data = csv.data;
-      if (hasHeaders) {
+      if (hasHeaders && data.length > 0) { // Check if data exists before shifting
         data.shift();
       }
       return data;
@@ -363,22 +463,38 @@
       }
       e.target.setAttribute('data-submitting', '');
       spinner.style.display = 'inline-block';
+      button.disabled = true; // Disable button
 
-      const form = new FormData(e.target);
-      const year = form.get('year');
-      const shortFile = form.get('short');
-      const longFile = form.get('long');
-      const hasHeaders = form.get('headers') === 'on';
-      const [f8949Bytes, shortData, longData] = await Promise.all([
-        fetch(`/forms/f8949--${year}.pdf`).then(r => r.arrayBuffer()),
-        parseCsv(shortFile, hasHeaders),
-        parseCsv(longFile, hasHeaders)
-      ]);
+      const formElement = e.target; // Use formElement for clarity
+      const formData = new FormData(formElement); // Use correct variable name
+      const year = formData.get('year');
+      const shortFile = formData.get('short');
+      const longFile = formData.get('long');
+      const hasHeaders = formData.get('headers') === 'on';
 
-      await generate8949(f8949Bytes, year, shortData, longData).then(download);
+      try {
+        const [f8949Bytes, shortData, longData] = await Promise.all([
+          // Ensure the path is correct for fetching the PDF form
+          fetch(`./forms/f8949--${year}.pdf`).then(r => {
+             if (!r.ok) { throw new Error(`Failed to fetch form for year ${year}: ${r.statusText}`); }
+             return r.arrayBuffer();
+          }),
+          parseCsv(shortFile, hasHeaders),
+          parseCsv(longFile, hasHeaders)
+        ]);
 
-      spinner.style.display = 'none';
-      e.target.removeAttribute('data-submitting');
+        const filledPdfFile = await generate8949(f8949Bytes, year, shortData, longData);
+        download(filledPdfFile);
+
+      } catch (error) {
+          console.error("Error processing form:", error);
+          alert(`An error occurred: ${error.message}\nPlease check console for details.`); // Inform user
+      } finally {
+          // Re-enable form regardless of success or failure
+          spinner.style.display = 'none';
+          formElement.removeAttribute('data-submitting');
+          button.disabled = false; // Re-enable button
+      }
     });
   </script>
 </body>
