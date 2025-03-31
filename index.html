@@ -245,7 +245,7 @@
 
   <script type="module">
     import Papa from 'https://cdn.jsdelivr.net/npm/papaparse@5.4.1/+esm';
-    import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString } from 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm';
+    import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString, PDFBool } from 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm'; // Added PDFBool
 
     const button = document.querySelector('button');
     const spinner = document.querySelector('span.inline-spinner');
@@ -265,193 +265,233 @@
     // Original code from: https://github.com/Hopding/pdf-lib/issues/151
     function cloneAnnotations(page) {
       const form = page.doc.catalog.lookup(PDFName.of('AcroForm'), PDFDict);
+      if (!form) return; // Exit if no AcroForm found
       const fields = form.lookup(PDFName.of('Fields'), PDFArray);
+      if (!fields) return; // Exit if no Fields array found
+
       const annotations = page.node.Annots();
-      if (annotations) { // Check if annotations exist
-        for (let i = 0; i < annotations.size(); i++) {
-          const a = annotations.lookup(i, PDFDict);
-          // Only clone if it's likely a form field annotation (Widget type)
-          if (a.lookup(PDFName.Type) === PDFName.Annot && a.lookup(PDFName.Subtype) === PDFName.Widget) {
-              const clonedA = a.clone(page.doc.context); // Clone the annotation dictionary
-              clonedA.set(PDFName.of('T'), PDFString.of(annotationIds.next().value)); // Set unique T key
-              fields.push(clonedA.ref); // Pushes the indirect reference to the object
-          }
+      if (!annotations) return; // Exit if no Annots found
+
+      for (let i = 0; i < annotations.size(); i++) {
+        const annotRef = annotations.get(i);
+        const annotDict = annotations.lookupMaybe(i, PDFDict);
+
+        // Ensure it's a widget annotation and has a /T key
+        if (annotDict && annotDict.get(PDFName.of('Subtype')) === PDFName.of('Widget') && annotDict.has(PDFName.of('T'))) {
+           // Check if this annotation reference is already in the Fields array to avoid duplication
+           let alreadyInFields = false;
+           for (let j=0; j < fields.size(); j++) {
+             if (fields.get(j) === annotRef) {
+                alreadyInFields = true;
+                break;
+             }
+           }
+           
+           // If not already in main Fields array, clone, give unique T, and add.
+           if (!alreadyInFields) {
+              const clonedAnnotDict = annotDict.clone(page.doc.context);
+              clonedAnnotDict.set(PDFName.of('T'), PDFString.of(annotationIds.next().value));
+              // Add the *reference* to the cloned dictionary to the Fields array.
+              // Note: This assumes cloning automatically registers the new object and gives it a ref.
+              // If pdf-lib's clone doesn't auto-register, we might need pdfDoc.context.register(clonedAnnotDict)
+              // before pushing the reference. Let's assume it does for now as per typical design.
+              const clonedAnnotRef = page.doc.context.register(clonedAnnotDict);
+              fields.push(clonedAnnotRef); 
+           } else {
+             // If it *is* in the Fields array, we might still need a unique ID if multiple pages
+             // reference the *same* original field definition but need independent values.
+             // This part is tricky - simply setting T might not be enough if the original field is shared.
+             // A safer approach for truly independent fields might be restructuring how fields are added/cloned.
+             // For now, let's stick to the original goal of adding copies unique *per page*.
+             // If the *same* field ref is used on *multiple* copied pages, they might still link.
+             // The `annotationIds.next().value` ensures each *widget annotation instance* on the page gets a new T key.
+             annotDict.set(PDFName.of('T'), PDFString.of(annotationIds.next().value));
+           }
         }
       }
     };
 
-    async function generatePage(originalDoc, data, type) {
-      // Copy the correct template page (0 for short, 1 for long)
-      const [page] = type === 'short' ? await originalDoc.copyPages(originalDoc, [0]) : await originalDoc.copyPages(originalDoc, [1]);
-
-      // Clone the annotations from the original template page onto the new page instance
-      // This ensures the new page has the fields array populated correctly for filling
-       cloneAnnotations(page); // Corrected: Operate on the newly copied page
-
-      const form = originalDoc.getForm(); // Get the form object once
+    async function generatePage(f8949, data, type) {
+      // Determine source page index based on type
+      const sourcePageIndex = type === 'short' ? 0 : 1;
+      
+      // Get the original page *once* per type to avoid repeated lookups if possible
+      // This assumes f8949 contains the original template pages at indices 0 and 1
+      const originalPage = f8949.getPage(sourcePageIndex);
+    
+      // Copy the determined page
+      const [page] = await f8949.copyPages(f8949, [sourcePageIndex]);
+      
+      // Clone annotations specific to THIS newly copied page
+      cloneAnnotations(page);
 
       let cellNumber = 0;
-      const offset = 5; // Offset based on visual inspection/debugging (may need adjustment for different forms/years)
-      const fieldsOnPage = form.getFields().filter(field => field.acroField.getParent() === page.node.Annots()); // Attempt to get fields associated with this page, might not be direct in pdf-lib
+      // Offset might vary depending on exact form structure; 5 was the original value
+      const offset = 5; 
+      
+      // Get annotations *from the newly copied page*
+      const annots = page.node.Annots(); 
+      if (!annots) return page; // Return unmodified page if no annotations
 
-      // Get all fields associated with the AcroForm,
-      // We'll rely on the implicit order matching the visual layout and the cloned 'T' keys for *potential* future mapping,
-      // but primarily use index based filling as before after cloning.
-      // Note: pdf-lib might fill based on the /Fields array order added by cloneAnnotations.
-      const allFields = form.getFields();
-
-      // We need to find the indices in the main 'Fields' array that correspond to the *cloned* annotations
-       // for this specific page. This is tricky as pdf-lib doesn't maintain a direct page->field mapping post-cloning.
-       // The cloneAnnotations function adds the *cloned* annots to the end of the main /Fields array.
-       // If pages are generated sequentially, we might infer the field indices based on how many were added previously.
-       // Let's assume cloneAnnotations adds 14*8 (rows*cols) + some other fields per page? Needs verification.
-       // For simplicity, let's stick to the lookup-by-index-on-page-annotations approach, assuming pdf-lib maps V correctly upon save.
-
-      const annots = page.node.Annots(); // Get the annotations array *of the copied page*
-
-       if (annots) { // Ensure annotations exist on the copied page
-          let fieldIndexOnPage = 0; // Keep track of potential *widget* annotations on the page
-          for (let annotIndex = 0; annotIndex < annots.size(); annotIndex++) {
-                const annotDict = annots.lookup(annotIndex, PDFDict);
-                // Check if it's a Widget annotation (likely a field)
-                if (annotDict.lookup(PDFName.Subtype) === PDFName.Widget) {
-                  // We are looking for the specific table cells, assuming they start after an offset
-                  if(fieldIndexOnPage >= offset && cellNumber < data.length * data[0].length) { // Check we are within data bounds
-                    const rowIndex = Math.floor(cellNumber / data[0].length);
-                    const colIndex = cellNumber % data[0].length;
-                    if (rowIndex < data.length && colIndex < data[rowIndex].length) {
-                        const cellValue = data[rowIndex][colIndex];
-                        // Set the Value ('/V') directly on the annotation dictionary
-                        // PDFString.of() handles encoding correctly
-                       annotDict.set(PDFName.of('V'), PDFString.of(cellValue || '')); // Use empty string if cell is null/undefined
-                       annotDict.set(PDFName.of('AP'), null); // Remove existing appearance stream, pdf-lib will generate on save/flatten
-                     }
-                    cellNumber++;
-                  }
-                  fieldIndexOnPage++; // Increment only for widget annotations
-               }
-            }
+      // Populate the fields on the copied page
+      for (const row of data) {
+        for (const cell of row) {
+          const annotIndex = cellNumber + offset;
+          // Use lookupMaybe to avoid errors if index is out of bounds
+          const a = annots.lookupMaybe(annotIndex, PDFDict); 
+          if (a && a.get(PDFName.of('Subtype')) === PDFName.of('Widget')) { // Check if it's a widget field
+              a.set(PDFName.of('V'), PDFString.of(String(cell))); // Ensure cell is string
+              a.set(PDFName.of('Ff'), PDFString.of('0')); // Optionally reset flags if needed, e.g., clear ReadOnly if set
+              // We might need to update the appearance stream (/AP) as well, but
+              // setting NeedAppearances = true on the AcroForm should handle this globally.
+          } else {
+              console.warn(`Annotation at index ${annotIndex} not found or not a widget on ${type} page.`);
+          }
+          cellNumber++;
         }
+      }
 
       return page;
     }
 
     async function generate8949(f8949Bytes, year, shortData, longData) {
-      // Load the original IRS Form 8949 PDF bytes
-      const f8949 = await PDFDocument.load(f8949Bytes, {
-           updateMetadata: false, // May help prevent issues with metadata conflicts
+      const f8949 = await PDFDocument.load(f8949Bytes, { 
+          // Option to ignore minor errors during loading if needed
+          // ignoreEncryption: true, 
+          // updateFieldAppearances: true // Let pdf-lib try to update appearances
       });
-      const pagePromises = []; // To hold promises for generated pages
-      const chunkSize = 14; // Number of transaction rows per PDF page
 
-       // Initialize AcroForm Fields if not present (might be needed if original is pure XFA)
-       // This part might require more checks depending on the source PDF structure
-       const catalog = f8949.catalog;
-       let acroForm = catalog.lookup(PDFName.of('AcroForm'), PDFDict);
-       if (!acroForm) {
-           acroForm = f8949.context.obj({ Type: 'AcroForm', Fields: [] });
-           catalog.set(PDFName.of('AcroForm'), acroForm);
-        } else if (!acroForm.has(PDFName.of('Fields'))) {
-           acroForm.set(PDFName.of('Fields'), f8949.context.obj([]));
-       }
+      // --- XFA Removal Start ---
+      try {
+          const form = f8949.getForm();
+          const acroFormDict = form?.catalog?.lookup(PDFName.of('AcroForm'), PDFDict);
 
-      // Generate pages for short-term transactions
+          if (acroFormDict?.has(PDFName.of('XFA'))) {
+              console.log("XFA found, removing...");
+              acroFormDict.delete(PDFName.of('XFA'));
+              
+              // Set NeedAppearances to true - crucial for non-XFA viewers
+              acroFormDict.set(PDFName.of('NeedAppearances'), PDFBool.True);
+              console.log("XFA removed and NeedAppearances set.");
+          } else {
+              console.log("No XFA field found in AcroForm.");
+              // Even if no XFA, setting NeedAppearances might be beneficial
+              if (acroFormDict) {
+                 acroFormDict.set(PDFName.of('NeedAppearances'), PDFBool.True);
+                 console.log("NeedAppearances set (no XFA found).");
+              }
+          }
+      } catch (error) {
+        console.error("Error accessing or modifying AcroForm:", error);
+        // Decide how to handle: maybe continue without removal, maybe throw error
+      }
+      // --- XFA Removal End ---
+
+      const pagePromises = [];
+      const chunkSize = 14; // Rows per page in the form
+
+      // Generate short-term pages
       for (let i = 0; i < shortData.length; i += chunkSize) {
-        const chunk = shortData.slice(i, i + chunkSize); // Get a chunk of 14 rows
-        // Generate a page for this chunk, copying the short-term template (page 0)
+        const chunk = shortData.slice(i, i + chunkSize);
         pagePromises.push(generatePage(f8949, chunk, 'short'));
       }
-      // If there are no short-term transactions, add a blank short-term page by copying
-      if (shortData.length === 0) {
-        const [blankShortPage] = await f8949.copyPages(f8949, [0]);
-         cloneAnnotations(blankShortPage); // Clone annotations even for blank pages for consistency
-        pagePromises.push(Promise.resolve(blankShortPage)); // Resolve promise immediately
+      // Add a blank short-term page if no short-term data
+      if (shortData.length === 0) { 
+        console.log("No short term data, adding blank page 1 template.");
+        pagePromises.push(
+          f8949.copyPages(f8949, [0]).then(pages => {
+             const blankPage = pages[0];
+             cloneAnnotations(blankPage); // Ensure fields are independent even on blank pages
+             return blankPage;
+          })
+        );
       }
-
-      // Generate pages for long-term transactions
+      
+      // Generate long-term pages
       for (let i = 0; i < longData.length; i += chunkSize) {
-        const chunk = longData.slice(i, i + chunkSize); // Get a chunk of 14 rows
-        // Generate a page for this chunk, copying the long-term template (page 1)
+        const chunk = longData.slice(i, i + chunkSize);
         pagePromises.push(generatePage(f8949, chunk, 'long'));
       }
-      // If there are no long-term transactions, add a blank long-term page by copying
-      if (longData.length === 0) {
-         const [blankLongPage] = await f8949.copyPages(f8949, [1]);
-         cloneAnnotations(blankLongPage); // Clone annotations even for blank pages
-         pagePromises.push(Promise.resolve(blankLongPage)); // Resolve promise immediately
+       // Add a blank long-term page if no long-term data
+      if (longData.length === 0) { 
+        console.log("No long term data, adding blank page 2 template.");
+         pagePromises.push(
+          f8949.copyPages(f8949, [1]).then(pages => {
+             const blankPage = pages[0];
+             cloneAnnotations(blankPage); // Ensure fields are independent even on blank pages
+             return blankPage;
+          })
+        );
       }
-
+      
       // Wait for all page generation promises to resolve
-      const pages = await Promise.all(pagePromises);
+      const generatedPages = await Promise.all(pagePromises);
 
-       // Add all the newly generated (and filled) pages to the document *before* removing old ones
-      for (const page of pages) {
+      // Remove the original template pages *after* copying and processing
+      // Remove in reverse order to avoid index shifting issues
+       if (f8949.getPageCount() > 1) f8949.removePage(1); 
+       if (f8949.getPageCount() > 0) f8949.removePage(0);
+
+      // Add the newly generated pages (now containing data or being blank templates)
+      for (const page of generatedPages) {
         f8949.addPage(page);
       }
 
-      // Remove the original 2 template pages from the PDF
-      // Important: Remove pages *after* adding new ones and potentially cloning resources they need.
-      f8949.removePage(0);
-      f8949.removePage(0); // Remove the first page again, as indices shift after the first removal
+      // Log final page count
+      console.log(`Final PDF page count: ${f8949.getPageCount()}`);
 
-      // --- Modification Start ---
-      // Get the PDF's form object
-      const form = f8949.getForm();
-
-       // Attempt to update appearance streams before flattening
-       try {
-           form.updateFieldAppearances();
-       } catch (e) {
-           console.warn("Could not update field appearances, flattening might use default appearances.", e);
-       }
-
-      // Flatten the form fields, making them static content and removing XFA/AcroForm structures
-      try {
-        form.flatten();
-      } catch (e) {
-         console.error("Error during form flattening:", e);
-         // Decide how to handle: maybe alert user, maybe save unflattened?
-         // Saving unflattened as fallback:
-         // return f8949.save({ useObjectStreams: false }).then(data => new File([data.buffer], `f8949_${year}_filled_unflattened.pdf`, { type: 'application/pdf' }));
-         throw new Error("Failed to flatten PDF form."); // Or re-throw error
-      }
-      // --- Modification End ---
-
-      // Save the modified PDF document into bytes
-      // Using useObjectStreams: false can sometimes improve compatibility
-      return f8949.save({ useObjectStreams: false }).then(data => new File([data.buffer], `f8949_${year}_filled.pdf`, { type: 'application/pdf' }));
+      // Save the modified PDF
+      // Use updateFieldAppearances option here might be redundant if NeedAppearances=true worked,
+      // but can be added as a fallback.
+      return f8949.save({ updateFieldAppearances: true }).then(data => 
+         new File([data.buffer], `f8949_${year}_filled.pdf`, { type: 'application/pdf' }) // Changed name slightly
+      );
     }
 
     function download(file) {
       const a = document.createElement('a');
       a.href = URL.createObjectURL(file);
       a.download = file.name;
+      document.body.appendChild(a); // Append to body for Firefox compatibility
       a.click();
-      URL.revokeObjectURL(a.href); // Clean up the object URL
+      document.body.removeChild(a); // Clean up
+      URL.revokeObjectURL(a.href); // Release object URL
     }
 
     async function parseCsv(file, hasHeaders) {
-      const csv = await new Promise((resolve, reject) => {
+      return new Promise((resolve, reject) => { // Return the promise directly
+        if (!file || file.size === 0) {
+          console.log("Empty file provided for parsing, resolving with empty data.");
+          resolve({ data: [] }); // Resolve with empty data structure expected by PapaParse
+          return;
+        }
         Papa.parse(file, {
-          header: false,
+          header: false, // We handle headers manually if checked
           skipEmptyLines: 'greedy',
-          complete: resolve,
-          error: reject
+          complete: (results) => {
+              console.log(`Parsed CSV: ${results.data.length} rows found.`);
+              const data = results.data;
+              if (hasHeaders && data.length > 0) {
+                 console.log("Removing header row.");
+                 data.shift(); // Remove header row
+              }
+              // Validate row structure (optional but recommended)
+              // e.g., check if rows have expected number of columns
+              resolve({ data: data }); // Resolve with the processed data under 'data' key
+          },
+          error: (error) => {
+              console.error("CSV Parsing Error:", error);
+              reject(error);
+          }
         });
       });
-
-      const data = csv.data;
-      if (hasHeaders && data.length > 0) { // Check if data exists before shifting
-        data.shift();
-      }
-      return data;
     }
 
     document.querySelector('#template-link').addEventListener('click', e => {
       e.preventDefault();
       const csv = 'Description of property,Date acquired,Date sold or disposed of,Proceeds (sales price),Cost or other basis,Code(s) from instructions,Amount of adjustment,Gain or (loss)';
       const encoded = new TextEncoder().encode(csv);
-      const file = new File([encoded], 'template.csv', { type: 'text/csv' });
+      const file = new File([encoded], 'template.csv', { type: 'text/csv;charset=utf-8' }); // Added charset
       download(file);
     });
 
@@ -465,34 +505,66 @@
       spinner.style.display = 'inline-block';
       button.disabled = true; // Disable button
 
-      const formElement = e.target; // Use formElement for clarity
-      const formData = new FormData(formElement); // Use correct variable name
-      const year = formData.get('year');
-      const shortFile = formData.get('short');
-      const longFile = formData.get('long');
-      const hasHeaders = formData.get('headers') === 'on';
-
       try {
-        const [f8949Bytes, shortData, longData] = await Promise.all([
-          // Ensure the path is correct for fetching the PDF form
-          fetch(`./forms/f8949--${year}.pdf`).then(r => {
-             if (!r.ok) { throw new Error(`Failed to fetch form for year ${year}: ${r.statusText}`); }
-             return r.arrayBuffer();
-          }),
-          parseCsv(shortFile, hasHeaders),
-          parseCsv(longFile, hasHeaders)
-        ]);
+          const form = new FormData(e.target);
+          const year = form.get('year');
+          const shortFile = form.get('short');
+          const longFile = form.get('long');
+          const hasHeaders = form.get('headers') === 'on';
 
-        const filledPdfFile = await generate8949(f8949Bytes, year, shortData, longData);
-        download(filledPdfFile);
+          // Fetch PDF template first
+          let f8949Bytes;
+          try {
+              const response = await fetch(`/forms/f8949--${year}.pdf`);
+              if (!response.ok) {
+                  throw new Error(`Failed to fetch PDF form for year ${year}: ${response.statusText}`);
+              }
+              f8949Bytes = await response.arrayBuffer();
+              console.log(`Successfully fetched PDF for ${year}`);
+          } catch (fetchError) {
+              console.error("Error fetching PDF:", fetchError);
+              alert(`Could not load the Form 8949 PDF for ${year}. Please check the year selection or try again later.`);
+              spinner.style.display = 'none';
+              e.target.removeAttribute('data-submitting');
+              button.disabled = false;
+              return; // Stop execution
+          }
+
+          // Parse CSV files concurrently
+          const [shortResult, longResult] = await Promise.all([
+              parseCsv(shortFile, hasHeaders).catch(err => { console.error("Short CSV parse error:", err); return { data: [] }; }), // Catch error here
+              parseCsv(longFile, hasHeaders).catch(err => { console.error("Long CSV parse error:", err); return { data: [] }; })   // Catch error here
+          ]);
+          
+          const shortData = shortResult.data;
+          const longData = longResult.data;
+
+          console.log(`Short-term data rows: ${shortData.length}`);
+          console.log(`Long-term data rows: ${longData.length}`);
+          
+          if(shortFile.size > 0 && shortData.length === 0 && !hasHeaders) {
+               console.warn("Short term file provided but parsed as empty. Check CSV format?");
+          }
+          if(longFile.size > 0 && longData.length === 0 && !hasHeaders) {
+               console.warn("Long term file provided but parsed as empty. Check CSV format?");
+          }
+
+          // Generate the PDF
+          console.log("Generating PDF...");
+          const generatedPdfFile = await generate8949(f8949Bytes, year, shortData, longData);
+          console.log("PDF generation complete. Starting download...");
+          
+          // Download the generated file
+          download(generatedPdfFile);
+          console.log("Download initiated.");
 
       } catch (error) {
-          console.error("Error processing form:", error);
-          alert(`An error occurred: ${error.message}\nPlease check console for details.`); // Inform user
+          console.error("An error occurred during form processing:", error);
+          alert("An unexpected error occurred while generating the PDF. Please check the console for details.");
       } finally {
-          // Re-enable form regardless of success or failure
+          // Ensure UI is reset regardless of success or failure
           spinner.style.display = 'none';
-          formElement.removeAttribute('data-submitting');
+          e.target.removeAttribute('data-submitting');
           button.disabled = false; // Re-enable button
       }
     });
