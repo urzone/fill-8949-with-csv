@@ -274,7 +274,7 @@
           if (a.lookup(PDFName.Type) === PDFName.Annot && a.lookup(PDFName.Subtype) === PDFName.Widget) {
               const clonedA = a.clone(page.doc.context); // Clone the annotation dictionary
               clonedA.set(PDFName.of('T'), PDFString.of(annotationIds.next().value)); // Set unique T key
-              fields.push(clonedA); // Add the cloned annotation to the form fields array
+              fields.push(clonedA.ref); // Pushes the indirect reference to the object
           }
         }
       }
