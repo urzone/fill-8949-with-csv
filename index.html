@@ -528,7 +528,7 @@
       
       // Function to create a page with table
       const createTablePage = (title, data, isShortTerm) => {
-        const page = pdfDoc.addPage([612, 792]); // Letter size
+        let page = pdfDoc.addPage([612, 792]); // Letter size
         const { width, height } = page.getSize();
         const margin = 50;
         
@@ -698,15 +698,15 @@
         pagePromises.push(f8949.copyPages(f8949, [1]).then(p => p[0]));
       }
       const pages = await Promise.all(pagePromises);
-
+    
       for (const page of pages) {
         f8949.addPage(page);
       }
-
+    
       // Remove the original 2 pages of the PDF
       f8949.removePage(0);
       f8949.removePage(0);
-
+    
       const filename = isStatic ? `f8949_${year}_static` : `f8949_${year}_filled`;
       return f8949.save().then(data => new File([data.buffer], filename, { type: 'application/pdf' }));
     }
@@ -770,13 +770,21 @@
           await generateStaticPDF(year, shortData, longData).then(download);
         } else {
           // Generate form-based PDF with fillable fields
-          const f8949Bytes = await fetch(`/forms/f8949--${year}.pdf`).then(r => r.arrayBuffer());
-          await generate8949(f8949Bytes, year, shortData, longData).then(download);
+          try {
+            const response = await fetch(`/forms/f8949--${year}.pdf`);
+            if (!response.ok) {
+              throw new Error(`Failed to fetch PDF template: ${response.status} ${response.statusText}`);
+            }
+            const f8949Bytes = await response.arrayBuffer();
+            await generate8949(f8949Bytes, year, shortData, longData).then(download);
+          } catch (fetchError) {
+            console.error('Error fetching PDF template:', fetchError);
+            alert(`Error fetching PDF template: ${fetchError.message}. Please try a different year or format.`);
+          }
+        } catch (error) {
+          console.error('Error generating PDF:', error);
+          alert('An error occurred while generating the PDF. Please try again.');
         }
-      } catch (error) {
-        console.error('Error generating PDF:', error);
-        alert('An error occurred while generating the PDF. Please try again.');
-      }
 
       spinner.style.display = 'none';
       e.target.removeAttribute('data-submitting');
