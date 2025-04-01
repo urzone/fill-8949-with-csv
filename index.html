@@ -567,31 +567,72 @@
           // updateFieldAppearances: true // Let pdf-lib try to update appearances
       });
 
-      // --- XFA Removal Start ---
+      // --- Enhanced XFA Removal Start ---
       try {
+          // First, try to get the AcroForm directly
           const form = f8949.getForm();
           const acroFormDict = form?.catalog?.lookup(PDFName.of('AcroForm'), PDFDict);
+          
+          // Track if we successfully modified the form
+          let xfaRemoved = false;
 
-          if (acroFormDict?.has(PDFName.of('XFA'))) {
-              console.log("XFA found, removing...");
-              acroFormDict.delete(PDFName.of('XFA'));
+          if (acroFormDict) {
+              console.log("AcroForm found, checking for XFA content...");
+              
+              // Remove XFA if present
+              if (acroFormDict.has(PDFName.of('XFA'))) {
+                  console.log("XFA found in AcroForm, removing...");
+                  acroFormDict.delete(PDFName.of('XFA'));
+                  xfaRemoved = true;
+              }
               
               // Set NeedAppearances to true - crucial for non-XFA viewers
               acroFormDict.set(PDFName.of('NeedAppearances'), PDFBool.True);
-              console.log("XFA removed and NeedAppearances set.");
-          } else {
-              console.log("No XFA field found in AcroForm.");
-              // Even if no XFA, setting NeedAppearances might be beneficial
-              if (acroFormDict) {
-                 acroFormDict.set(PDFName.of('NeedAppearances'), PDFBool.True);
-                 console.log("NeedAppearances set (no XFA found).");
+              console.log("NeedAppearances set to True");
+              
+              // Additional operations to ensure compatibility
+              // Set additional flags that might help with compatibility
+              if (!acroFormDict.has(PDFName.of('DA'))) {
+                  // Set a default appearance string if not present
+                  acroFormDict.set(PDFName.of('DA'), PDFString.of("/Helv 0 Tf 0 g"));
               }
+          } else {
+              console.log("No AcroForm dictionary found in the PDF");
           }
+          
+          // Additional approach: Check for XFA in the document Catalog directly
+          const catalog = f8949.context.lookup(f8949.catalog.ref);
+          if (catalog && catalog.has(PDFName.of('XFA'))) {
+              console.log("XFA found in document catalog, removing...");
+              catalog.delete(PDFName.of('XFA'));
+              xfaRemoved = true;
+          }
+          
+          // Process all form fields to ensure they have proper appearance streams
+          try {
+              const formFields = form.getFields();
+              console.log(`Processing ${formFields.length} form fields to ensure compatibility...`);
+              
+              // Force pdf-lib to regenerate appearance streams for all fields
+              for (const field of formFields) {
+                  const fieldDict = f8949.context.lookup(field.ref);
+                  if (fieldDict && fieldDict.has(PDFName.of('AP'))) {
+                      // Remove existing appearance streams to force regeneration
+                      fieldDict.delete(PDFName.of('AP'));
+                  }
+              }
+          } catch (fieldError) {
+              console.warn("Could not process all form fields:", fieldError);
+          }
+          
+          console.log(xfaRemoved ? 
+              "XFA content successfully removed from the document" : 
+              "No XFA content found or removal not needed");
+              
       } catch (error) {
-        console.error("Error accessing or modifying AcroForm:", error);
-        // Decide how to handle: maybe continue without removal, maybe throw error
+          console.error("Error during XFA removal process:", error);
       }
-      // --- XFA Removal End ---
+      // --- Enhanced XFA Removal End ---
 
       const pagePromises = [];
       const chunkSize = 14; // Rows per page in the form
