@@ -9,10 +9,10 @@
   <meta property="og:description" content="Web app that fills IRS Form 8949 with data from a CSV file.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://fill-8949.ardis.lu/">
-  <link rel="preconnect" href="https://rsms.me/">
-  <link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="icon" href="data:,">
-  <link rel="preload" href="https://rsms.me/inter/font-files/InterVariable.woff2?v=4.1" crossorigin as="font">
   <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/+esm">
   <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm">
   <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/tslib@1.14.1/+esm">
@@ -22,25 +22,20 @@
   <title>Fill IRS Form 8949 with CSV</title>
   <style>
     :root {
-      --primary: #1a4d7c;
-      --primary-light: #2975b9;
-      --primary-dark: #0f3155;
-      --secondary: #f8f9fa;
-      --accent: #4cc9f0;
-      --text: #333;
-      --text-light: #6c757d;
-      --success: #28a745;
-      --error: #dc3545;
-      --border-radius: 8px;
-      --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-      --transition: all 0.3s ease;
-      font-family: 'Inter', sans-serif;
-    }
-
-    @supports (font-variation-settings: normal) {
-      :root {
-        font-family: 'Inter var', sans-serif;
-      }
+      --primary: #1e40af;
+      --primary-light: #3b82f6;
+      --primary-dark: #1e3a8a;
+      --secondary: #f8fafc;
+      --accent: #60a5fa;
+      --text: #1e293b;
+      --text-light: #64748b;
+      --border: #cbd5e1;
+      --card-bg: #ffffff;
+      --page-bg: #f1f5f9;
+      --success: #10b981;
+      --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+      --transition: 0.2s ease-in-out;
+      --radius: 8px;
     }
 
     * {
@@ -50,257 +45,263 @@
     }
 
     body {
-      background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: var(--page-bg);
       color: var(--text);
+      line-height: 1.6;
       min-height: 100vh;
-      padding: 2rem;
       display: flex;
       flex-direction: column;
-      align-items: center;
       justify-content: center;
-      line-height: 1.6;
-    }
-
-    .container {
-      width: min(1000px, 100%);
-      margin: 0 auto;
+      align-items: center;
+      padding: 2rem 1rem;
     }
 
     header {
-      text-align: center;
       margin-bottom: 2rem;
+      text-align: center;
     }
 
     h1 {
-      font-size: 2.5rem;
+      font-size: 2.25rem;
       font-weight: 700;
-      margin-bottom: 1rem;
       color: var(--primary);
-      line-height: 1.2;
+      margin-bottom: 0.5rem;
+      letter-spacing: -0.025em;
     }
 
     .subtitle {
       color: var(--text-light);
-      font-size: 1.2rem;
+      font-size: 1.125rem;
       max-width: 600px;
       margin: 0 auto;
     }
 
+    .container {
+      max-width: 1000px;
+      width: 100%;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 2rem;
+    }
+
+    @media (min-width: 768px) {
+      .container {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
     .card {
-      background: white;
-      border-radius: var(--border-radius);
-      box-shadow: var(--box-shadow);
+      background: var(--card-bg);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
       padding: 2rem;
-      margin-bottom: 2rem;
-      transition: var(--transition);
+      transition: transform var(--transition), box-shadow var(--transition);
     }
 
     .card:hover {
-      box-shadow: 0 8px 15px rgba(0, 0, 0, 0.1);
+      transform: translateY(-3px);
+      box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
     }
 
-    .disclaimer, .privacy {
-      background: #f8f9fa;
-      border-left: 4px solid var(--primary);
-      padding: 1rem;
-      margin: 1.5rem 0;
-      border-radius: 0 var(--border-radius) var(--border-radius) 0;
-    }
-
-    .disclaimer b, .privacy b {
-      color: var(--primary);
-      display: block;
-      margin-bottom: 0.5rem;
-    }
-
-    .steps {
-      counter-reset: step;
-      margin: 2rem 0;
-    }
-
-    .step {
-      display: flex;
+    .card h2 {
+      font-size: 1.5rem;
       margin-bottom: 1.5rem;
-      padding: 0 0 0 3rem;
+      color: var(--primary);
       position: relative;
+      padding-bottom: 0.75rem;
     }
 
-    .step:before {
-      counter-increment: step;
-      content: counter(step);
+    .card h2::after {
+      content: '';
       position: absolute;
       left: 0;
-      top: 0;
-      background: var(--primary);
-      color: white;
-      width: 2rem;
-      height: 2rem;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: bold;
+      bottom: 0;
+      height: 3px;
+      width: 50px;
+      background: var(--accent);
+      border-radius: 3px;
     }
 
-    .form-container {
-      background: white;
-      border-radius: var(--border-radius);
-      box-shadow: var(--box-shadow);
-      padding: 2rem;
+    .info-card {
+      grid-column: 1 / -1;
     }
 
-    .form-group {
+    .form-card {
+      grid-column: 1 / -1;
+    }
+
+    .info-section {
       margin-bottom: 1.5rem;
     }
 
-    label {
-      display: block;
-      margin-bottom: 0.5rem;
-      font-weight: 500;
+    .info-section:last-child {
+      margin-bottom: 0;
+    }
+
+    .icon-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+      font-weight: 600;
       color: var(--primary-dark);
     }
 
-    select, input[type="file"] {
-      width: 100%;
-      padding: 0.75rem 1rem;
-      font-size: 1rem;
-      border: 1px solid #ced4da;
-      border-radius: var(--border-radius);
-      background-color: #fff;
-      transition: var(--transition);
-    }
-
-    select {
-      appearance: none;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%231a4d7c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: right 1rem center;
-      background-size: 1em;
-      padding-right: 2.5rem;
-    }
-
-    input[type="file"] {
-      padding: 0.5rem;
-    }
-
-    input[type="file"]::file-selector-button {
-      font-size: 0.9rem;
-      padding: 0.5rem 1rem;
-      margin-right: 1rem;
-      border-radius: var(--border-radius);
-      background-color: var(--secondary);
-      border: 1px solid #ced4da;
-      color: var(--text);
-      cursor: pointer;
-      transition: var(--transition);
-    }
-
-    input[type="file"]::file-selector-button:hover {
-      background-color: #e2e6ea;
-    }
-
-    .checkbox-group {
-      display: flex;
-      align-items: center;
-      margin-bottom: 1.5rem;
-    }
-
-    input[type="checkbox"] {
-      margin-right: 0.5rem;
-      width: 1.25rem;
-      height: 1.25rem;
-      accent-color: var(--primary);
-    }
-
-    button {
-      background-color: var(--primary);
-      color: white;
-      border: none;
-      padding: 0.75rem 1.5rem;
-      font-size: 1rem;
-      font-weight: 600;
-      border-radius: var(--border-radius);
-      cursor: pointer;
-      transition: var(--transition);
+    .icon {
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      width: 1.75rem;
+      height: 1.75rem;
+      background: var(--primary-light);
+      color: white;
+      border-radius: 50%;
+      font-size: 1rem;
     }
 
-    button:hover {
-      background-color: var(--primary-light);
-      transform: translateY(-2px);
+    ol {
+      padding-left: 1.25rem;
+      margin-bottom: 1rem;
     }
 
-    button:active {
-      transform: translateY(0);
+    li {
+      margin-bottom: 0.75rem;
     }
 
-    [data-submitting] button {
-      cursor: not-allowed;
-      background-color: var(--text-light);
-      opacity: 0.7;
-      transform: none;
+    li:last-child {
+      margin-bottom: 0;
     }
 
-    .button-container {
-      display: flex;
-      align-items: center;
-      justify-content: flex-start;
-      gap: 1rem;
-    }
-
-    .download-link {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      color: var(--primary);
-      font-weight: 600;
-      text-decoration: none;
-      transition: var(--transition);
-    }
-
-    .download-link:hover {
-      color: var(--primary-light);
-      text-decoration: underline;
-    }
-
-    .download-link svg {
-      transition: var(--transition);
-    }
-
-    .download-link:hover svg {
-      transform: translateY(2px);
-    }
-
-    .source {
-      margin-top: 1.5rem;
-      text-align: center;
-    }
-
-    .source a {
+    a {
       color: var(--primary);
       font-weight: 500;
       text-decoration: none;
-      display: inline-flex;
-      align-items: center;
+      transition: color var(--transition), text-decoration-color var(--transition);
+      text-underline-offset: 0.2em;
+    }
+
+    a:hover, a:focus {
+      color: var(--primary-light);
+      text-decoration: underline;
+    }
+
+    form {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
       gap: 0.5rem;
     }
 
-    .source a:hover {
-      color: var(--primary-light);
-      text-decoration: underline;
+    label {
+      font-weight: 500;
+      color: var(--text);
+      display: inline-block;
+      cursor: pointer;
+    }
+
+    select {
+      padding: 0.625rem 1rem;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      font-size: 1rem;
+      width: 100%;
+      max-width: 200px;
+      background-color: var(--secondary);
+      cursor: pointer;
+      transition: border-color var(--transition), box-shadow var(--transition);
+    }
+
+    .file-input-wrapper {
+      position: relative;
+      width: 100%;
+    }
+
+    .file-input {
+      font-size: 1rem;
+      width: 100%;
+      cursor: pointer;
+    }
+
+    .file-input::file-selector-button {
+      padding: 0.625rem 1rem;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background-color: var(--secondary);
+      color: var(--text);
+      font-size: 1rem;
+      font-weight: 500;
+      margin-right: 1rem;
+      cursor: pointer;
+      transition: background-color var(--transition), border-color var(--transition);
+    }
+
+    .file-input::file-selector-button:hover {
+      background-color: var(--primary-light);
+      color: white;
+      border-color: var(--primary-light);
+    }
+
+    .checkbox-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    input[type="checkbox"] {
+      width: 1.25rem;
+      height: 1.25rem;
+      accent-color: var(--primary);
+      cursor: pointer;
+    }
+
+    button {
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: var(--radius);
+      padding: 0.75rem 1.5rem;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color var(--transition), transform var(--transition);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      align-self: flex-start;
+    }
+
+    button:hover, button:focus {
+      background: var(--primary-light);
+      transform: translateY(-2px);
+    }
+
+    [data-submitting] button {
+      opacity: 0.7;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .download-icon {
+      width: 1.25em;
+      height: 1.25em;
     }
 
     .spinner {
       display: none;
-      width: 1.5rem;
-      height: 1.5rem;
+      width: 1.25em;
+      height: 1.25em;
       border: 3px solid rgba(255, 255, 255, 0.3);
       border-radius: 50%;
       border-top-color: white;
       animation: spin 1s ease-in-out infinite;
-      margin-left: 0.75rem;
     }
 
     @keyframes spin {
@@ -309,28 +310,24 @@
       }
     }
 
-    footer {
-      margin-top: 3rem;
+    .source {
       text-align: center;
+      margin-top: 2rem;
+      font-size: 0.875rem;
       color: var(--text-light);
-      font-size: 0.9rem;
     }
 
-    @media (max-width: 768px) {
-      body {
-        padding: 1rem;
-      }
-      
-      .card, .form-container {
+    @media (max-width: 480px) {
+      .card {
         padding: 1.5rem;
       }
       
       h1 {
-        font-size: 2rem;
+        font-size: 1.75rem;
       }
       
-      .step {
-        padding-left: 2.5rem;
+      button {
+        width: 100%;
       }
     }
   </style>
@@ -339,54 +336,67 @@
 <body>
   <div class="container">
     <header>
-      <h1>IRS Form 8949 Filler</h1>
-      <p class="subtitle">Easily fill IRS Form 8949 with your CSV data</p>
+      <h1>IRS Form 8949 CSV Filler</h1>
+      <p class="subtitle">A web tool to automatically fill IRS Form 8949 with your transaction data</p>
     </header>
 
-    <section class="card">
-      <div class="disclaimer">
-        <b>Disclaimer</b>
-        <p>The author of this tool is not responsible for any errors or omissions, or for the results obtained from the use of this tool. All outputs are provided "as is", with no guarantee of completeness, accuracy, or of the results obtained from the use of this tool, and without warranty of any kind. The output from this tool is provided with the understanding that the author is not herein engaged in rendering legal, accounting, tax, or other professional advice and services.</p>
-      </div>
-
-      <div class="privacy">
-        <b>Privacy</b>
-        <p>The CSV parsing and PDF filling operations occur in your web browser. Your CSV data does not leave your computer.</p>
-      </div>
-    </section>
-
-    <div class="form-container">
-      <div class="steps">
-        <div class="step">
-          <div>
-            <h3>Download CSV Templates</h3>
-            <p>Download two copies of the CSV template for short-term and long-term transactions.</p>
-            <a href="#" id="template-link" class="download-link">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 10 12 15 17 10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
-              </svg>
-              template.csv
-            </a>
-          </div>
+    <div class="card info-card">
+      <h2>How It Works</h2>
+      
+      <div class="info-section">
+        <div class="icon-header">
+          <span class="icon">1</span>
+          <span>Download CSV Template</span>
         </div>
-
-        <div class="step">
-          <div>
-            <h3>Fill the Templates</h3>
-            <p>Fill the templates with data to populate the tables on page 1 (short-term transactions) and page 2 (long-term transactions) of <a href="https://www.irs.gov/form8949" target="_blank">IRS Form 8949</a>.</p>
-          </div>
-        </div>
-
-        <div class="step">
-          <div>
-            <h3>Upload and Generate</h3>
-            <p>Select the filled CSV templates and click "Generate Filled Form" to download your customized IRS Form 8949.</p>
-          </div>
-        </div>
+        <p>Download our CSV template to format your transaction data correctly. The template includes all required columns for Form 8949.</p>
+        <p class="file-links">
+          <a id="template-link" href="#">
+            <svg xmlns="http://www.w3.org/2000/svg" class="download-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            template.csv
+          </a>
+        </p>
       </div>
+      
+      <div class="info-section">
+        <div class="icon-header">
+          <span class="icon">2</span>
+          <span>Fill Your Data</span>
+        </div>
+        <p>Fill the templates with your transaction data - one for short-term transactions and one for long-term transactions.</p>
+        <p>You'll need to provide descriptions, acquisition dates, sale dates, proceeds, cost basis, and any adjustment codes from <a href="https://www.irs.gov/form8949" target="_blank">IRS Form 8949 instructions</a>.</p>
+      </div>
+      
+      <div class="info-section">
+        <div class="icon-header">
+          <span class="icon">3</span>
+          <span>Generate Form</span>
+        </div>
+        <p>Upload your completed CSV files using the form below, select the tax year, and click "Generate Form" to download your filled Form 8949 PDF.</p>
+      </div>
+      
+      <div class="info-section">
+        <div class="icon-header">
+          <span class="icon">🔒</span>
+          <span>Privacy & Security</span>
+        </div>
+        <p>Your data never leaves your computer. All CSV parsing and PDF filling happens locally in your browser.</p>
+      </div>
+      
+      <div class="info-section">
+        <div class="icon-header">
+          <span class="icon">⚠️</span>
+          <span>Disclaimer</span>
+        </div>
+        <p>This tool is provided "as is", without warranty of any kind. The author is not responsible for any errors or omissions, or for the results obtained from the use of this tool. This is not legal, accounting, tax, or other professional advice.</p>
+      </div>
+    </div>
 
+    <div class="card form-card">
+      <h2>Generate Your Form</h2>
       <form>
         <div class="form-group">
           <label for="year">Tax Year</label>
@@ -408,50 +418,45 @@
 
         <div class="form-group">
           <label for="short">Short-term Transactions CSV</label>
-          <input type="file" id="short" name="short" accept="text/csv" required>
+          <div class="file-input-wrapper">
+            <input type="file" id="short" name="short" accept="text/csv" class="file-input" required>
+          </div>
         </div>
 
         <div class="form-group">
           <label for="long">Long-term Transactions CSV</label>
-          <input type="file" id="long" name="long" accept="text/csv" required>
+          <div class="file-input-wrapper">
+            <input type="file" id="long" name="long" accept="text/csv" class="file-input" required>
+          </div>
         </div>
 
-        <div class="checkbox-group">
-          <input type="checkbox" id="headers" name="headers" checked>
-          <label for="headers">CSV data has headers</label>
+        <div class="form-group">
+          <div class="checkbox-wrapper">
+            <input type="checkbox" id="headers" name="headers" checked>
+            <label for="headers">My CSV files include headers</label>
+          </div>
         </div>
 
-        <div class="button-container">
-          <button type="submit">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 8px;">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="7 10 12 15 17 10"></polyline>
-              <line x1="12" y1="15" x2="12" y2="3"></line>
-            </svg>
-            Generate Filled Form
-          </button>
-          <div class="spinner"></div>
-        </div>
-
-        <div class="source">
-          <a href="https://github.com/ardislu/fill-8949-with-csv" target="_blank">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
-            </svg>
-            View source code on GitHub
-          </a>
-        </div>
+        <button type="submit">
+          <svg xmlns="http://www.w3.org/2000/svg" class="download-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          Generate Form 8949
+          <span class="spinner"></span>
+        </button>
       </form>
     </div>
-
-    <footer>
-      <p>&copy; 2025 IRS Form 8949 Filler Tool</p>
-    </footer>
   </div>
+
+  <footer class="source">
+    <a href="https://github.com/ardislu/fill-8949-with-csv" target="_blank">View source code on GitHub</a>
+  </footer>
 
   <script type="module">
     import Papa from 'https://cdn.jsdelivr.net/npm/papaparse@5.4.1/+esm';
-    import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString, PDFBool } from 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm'; // Added PDFBool
+    import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString } from 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm';
 
     const button = document.querySelector('button');
     const spinner = document.querySelector('.spinner');
@@ -471,88 +476,26 @@
     // Original code from: https://github.com/Hopding/pdf-lib/issues/151
     function cloneAnnotations(page) {
       const form = page.doc.catalog.lookup(PDFName.of('AcroForm'), PDFDict);
-      if (!form) return; // Exit if no AcroForm found
       const fields = form.lookup(PDFName.of('Fields'), PDFArray);
-      if (!fields) return; // Exit if no Fields array found
-
       const annotations = page.node.Annots();
-      if (!annotations) return; // Exit if no Annots found
-
       for (let i = 0; i < annotations.size(); i++) {
-        const annotRef = annotations.get(i);
-        const annotDict = annotations.lookupMaybe(i, PDFDict);
-
-        // Ensure it's a widget annotation and has a /T key
-        if (annotDict && annotDict.get(PDFName.of('Subtype')) === PDFName.of('Widget') && annotDict.has(PDFName.of('T'))) {
-           // Check if this annotation reference is already in the Fields array to avoid duplication
-           let alreadyInFields = false;
-           for (let j=0; j < fields.size(); j++) {
-             if (fields.get(j) === annotRef) {
-                alreadyInFields = true;
-                break;
-             }
-           }
-           
-           // If not already in main Fields array, clone, give unique T, and add.
-           if (!alreadyInFields) {
-              const clonedAnnotDict = annotDict.clone(page.doc.context);
-              clonedAnnotDict.set(PDFName.of('T'), PDFString.of(annotationIds.next().value));
-              // Add the *reference* to the cloned dictionary to the Fields array.
-              // Note: This assumes cloning automatically registers the new object and gives it a ref.
-              // If pdf-lib's clone doesn't auto-register, we might need pdfDoc.context.register(clonedAnnotDict)
-              // before pushing the reference. Let's assume it does for now as per typical design.
-              const clonedAnnotRef = page.doc.context.register(clonedAnnotDict);
-              fields.push(clonedAnnotRef); 
-           } else {
-             // If it *is* in the Fields array, we might still need a unique ID if multiple pages
-             // reference the *same* original field definition but need independent values.
-             // This part is tricky - simply setting T might not be enough if the original field is shared.
-             // A safer approach for truly independent fields might be restructuring how fields are added/cloned.
-             // For now, let's stick to the original goal of adding copies unique *per page*.
-             // If the *same* field ref is used on *multiple* copied pages, they might still link.
-             // The `annotationIds.next().value` ensures each *widget annotation instance* on the page gets a new T key.
-             annotDict.set(PDFName.of('T'), PDFString.of(annotationIds.next().value));
-           }
-        }
+        const a = annotations.lookup(i, PDFDict);
+        a.set(PDFName.of('T'), PDFString.of(annotationIds.next().value));
+        fields.push(a);
       }
     };
 
     async function generatePage(f8949, data, type) {
-      // Determine source page index based on type
-      const sourcePageIndex = type === 'short' ? 0 : 1;
-      
-      // Get the original page *once* per type to avoid repeated lookups if possible
-      // This assumes f8949 contains the original template pages at indices 0 and 1
-      const originalPage = f8949.getPage(sourcePageIndex);
-    
-      // Copy the determined page
-      const [page] = await f8949.copyPages(f8949, [sourcePageIndex]);
-      
-      // Clone annotations specific to THIS newly copied page
+      const [page] = type === 'short' ? await f8949.copyPages(f8949, [0]) : await f8949.copyPages(f8949, [1]);
       cloneAnnotations(page);
 
       let cellNumber = 0;
-      // Offset might vary depending on exact form structure; 5 was the original value
-      const offset = 5; 
-      
-      // Get annotations *from the newly copied page*
-      const annots = page.node.Annots(); 
-      if (!annots) return page; // Return unmodified page if no annotations
-
-      // Populate the fields on the copied page
+      const offset = 5; // To skip to the table annotations
+      const annots = page.node.Annots();
       for (const row of data) {
         for (const cell of row) {
-          const annotIndex = cellNumber + offset;
-          // Use lookupMaybe to avoid errors if index is out of bounds
-          const a = annots.lookupMaybe(annotIndex, PDFDict); 
-          if (a && a.get(PDFName.of('Subtype')) === PDFName.of('Widget')) { // Check if it's a widget field
-              a.set(PDFName.of('V'), PDFString.of(String(cell))); // Ensure cell is string
-              a.set(PDFName.of('Ff'), PDFString.of('0')); // Optionally reset flags if needed, e.g., clear ReadOnly if set
-              // We might need to update the appearance stream (/AP) as well, but
-              // setting NeedAppearances = true on the AcroForm should handle this globally.
-          } else {
-              console.warn(`Annotation at index ${annotIndex} not found or not a widget on ${type} page.`);
-          }
+          const a = annots.lookup(cellNumber + offset, PDFDict);
+          a.set(PDFName.of('V'), PDFString.of(cell));
           cellNumber++;
         }
       }
@@ -561,143 +504,65 @@
     }
 
     async function generate8949(f8949Bytes, year, shortData, longData) {
-      const f8949 = await PDFDocument.load(f8949Bytes, { 
-          // Option to ignore minor errors during loading if needed
-          // ignoreEncryption: true, 
-          // updateFieldAppearances: true // Let pdf-lib try to update appearances
-      });
-
-      // --- XFA Removal Start ---
-      try {
-          const form = f8949.getForm();
-          const acroFormDict = form?.catalog?.lookup(PDFName.of('AcroForm'), PDFDict);
-
-          if (acroFormDict?.has(PDFName.of('XFA'))) {
-              console.log("XFA found, removing...");
-              acroFormDict.delete(PDFName.of('XFA'));
-              
-              // Set NeedAppearances to true - crucial for non-XFA viewers
-              acroFormDict.set(PDFName.of('NeedAppearances'), PDFBool.True);
-              console.log("XFA removed and NeedAppearances set.");
-          } else {
-              console.log("No XFA field found in AcroForm.");
-              // Even if no XFA, setting NeedAppearances might be beneficial
-              if (acroFormDict) {
-                 acroFormDict.set(PDFName.of('NeedAppearances'), PDFBool.True);
-                 console.log("NeedAppearances set (no XFA found).");
-              }
-          }
-      } catch (error) {
-        console.error("Error accessing or modifying AcroForm:", error);
-        // Decide how to handle: maybe continue without removal, maybe throw error
-      }
-      // --- XFA Removal End ---
-
+      const f8949 = await PDFDocument.load(f8949Bytes);
       const pagePromises = [];
-      const chunkSize = 14; // Rows per page in the form
-
-      // Generate short-term pages
+      const chunkSize = 14;
       for (let i = 0; i < shortData.length; i += chunkSize) {
         const chunk = shortData.slice(i, i + chunkSize);
         pagePromises.push(generatePage(f8949, chunk, 'short'));
       }
-      // Add a blank short-term page if no short-term data
-      if (shortData.length === 0) { 
-        console.log("No short term data, adding blank page 1 template.");
-        pagePromises.push(
-          f8949.copyPages(f8949, [0]).then(pages => {
-             const blankPage = pages[0];
-             cloneAnnotations(blankPage); // Ensure fields are independent even on blank pages
-             return blankPage;
-          })
-        );
+      if (shortData.length === 0) { // Push a blank page
+        pagePromises.push(f8949.copyPages(f8949, [0]).then(p => p[0]));
       }
-      
-      // Generate long-term pages
       for (let i = 0; i < longData.length; i += chunkSize) {
         const chunk = longData.slice(i, i + chunkSize);
         pagePromises.push(generatePage(f8949, chunk, 'long'));
       }
-       // Add a blank long-term page if no long-term data
-      if (longData.length === 0) { 
-        console.log("No long term data, adding blank page 2 template.");
-         pagePromises.push(
-          f8949.copyPages(f8949, [1]).then(pages => {
-             const blankPage = pages[0];
-             cloneAnnotations(blankPage); // Ensure fields are independent even on blank pages
-             return blankPage;
-          })
-        );
+      if (longData.length === 0) { // Push a blank page
+        pagePromises.push(f8949.copyPages(f8949, [1]).then(p => p[0]));
       }
-      
-      // Wait for all page generation promises to resolve
-      const generatedPages = await Promise.all(pagePromises);
+      const pages = await Promise.all(pagePromises);
 
-      // Remove the original template pages *after* copying and processing
-      // Remove in reverse order to avoid index shifting issues
-       if (f8949.getPageCount() > 1) f8949.removePage(1); 
-       if (f8949.getPageCount() > 0) f8949.removePage(0);
-
-      // Add the newly generated pages (now containing data or being blank templates)
-      for (const page of generatedPages) {
+      for (const page of pages) {
         f8949.addPage(page);
       }
 
-      // Log final page count
-      console.log(`Final PDF page count: ${f8949.getPageCount()}`);
+      // Remove the original 2 pages of the PDF
+      f8949.removePage(0);
+      f8949.removePage(0);
 
-      // Save the modified PDF
-      // Use updateFieldAppearances option here might be redundant if NeedAppearances=true worked,
-      // but can be added as a fallback.
-      return f8949.save({ updateFieldAppearances: true }).then(data => 
-         new File([data.buffer], `f8949_${year}_filled.pdf`, { type: 'application/pdf' }) // Changed name slightly
-      );
+      return f8949.save().then(data => new File([data.buffer], `f8949_${year}_filled.pdf`, { type: 'application/pdf' }));
     }
 
     function download(file) {
       const a = document.createElement('a');
       a.href = URL.createObjectURL(file);
       a.download = file.name;
-      document.body.appendChild(a); // Append to body for Firefox compatibility
       a.click();
-      document.body.removeChild(a); // Clean up
-      URL.revokeObjectURL(a.href); // Release object URL
     }
 
     async function parseCsv(file, hasHeaders) {
-      return new Promise((resolve, reject) => { // Return the promise directly
-        if (!file || file.size === 0) {
-          console.log("Empty file provided for parsing, resolving with empty data.");
-          resolve({ data: [] }); // Resolve with empty data structure expected by PapaParse
-          return;
-        }
+      const csv = await new Promise((resolve, reject) => {
         Papa.parse(file, {
-          header: false, // We handle headers manually if checked
+          header: false,
           skipEmptyLines: 'greedy',
-          complete: (results) => {
-              console.log(`Parsed CSV: ${results.data.length} rows found.`);
-              const data = results.data;
-              if (hasHeaders && data.length > 0) {
-                 console.log("Removing header row.");
-                 data.shift(); // Remove header row
-              }
-              // Validate row structure (optional but recommended)
-              // e.g., check if rows have expected number of columns
-              resolve({ data: data }); // Resolve with the processed data under 'data' key
-          },
-          error: (error) => {
-              console.error("CSV Parsing Error:", error);
-              reject(error);
-          }
+          complete: resolve,
+          error: reject
         });
       });
+
+      const data = csv.data;
+      if (hasHeaders) {
+        data.shift();
+      }
+      return data;
     }
 
     document.querySelector('#template-link').addEventListener('click', e => {
       e.preventDefault();
       const csv = 'Description of property,Date acquired,Date sold or disposed of,Proceeds (sales price),Cost or other basis,Code(s) from instructions,Amount of adjustment,Gain or (loss)';
       const encoded = new TextEncoder().encode(csv);
-      const file = new File([encoded], 'template.csv', { type: 'text/csv;charset=utf-8' }); // Added charset
+      const file = new File([encoded], 'template.csv', { type: 'text/csv' });
       download(file);
     });
 
@@ -709,69 +574,27 @@
       }
       e.target.setAttribute('data-submitting', '');
       spinner.style.display = 'inline-block';
-      button.disabled = true; // Disable button
 
+      const form = new FormData(e.target);
+      const year = form.get('year');
+      const shortFile = form.get('short');
+      const longFile = form.get('long');
+      const hasHeaders = form.get('headers') === 'on';
+      
       try {
-          const form = new FormData(e.target);
-          const year = form.get('year');
-          const shortFile = form.get('short');
-          const longFile = form.get('long');
-          const hasHeaders = form.get('headers') === 'on';
+        const [f8949Bytes, shortData, longData] = await Promise.all([
+          fetch(`/forms/f8949--${year}.pdf`).then(r => r.arrayBuffer()),
+          parseCsv(shortFile, hasHeaders),
+          parseCsv(longFile, hasHeaders)
+        ]);
 
-          // Fetch PDF template first
-          let f8949Bytes;
-          try {
-              const response = await fetch(`/forms/f8949--${year}.pdf`);
-              if (!response.ok) {
-                  throw new Error(`Failed to fetch PDF form for year ${year}: ${response.statusText}`);
-              }
-              f8949Bytes = await response.arrayBuffer();
-              console.log(`Successfully fetched PDF for ${year}`);
-          } catch (fetchError) {
-              console.error("Error fetching PDF:", fetchError);
-              alert(`Could not load the Form 8949 PDF for ${year}. Please check the year selection or try again later.`);
-              spinner.style.display = 'none';
-              e.target.removeAttribute('data-submitting');
-              button.disabled = false;
-              return; // Stop execution
-          }
-
-          // Parse CSV files concurrently
-          const [shortResult, longResult] = await Promise.all([
-              parseCsv(shortFile, hasHeaders).catch(err => { console.error("Short CSV parse error:", err); return { data: [] }; }), // Catch error here
-              parseCsv(longFile, hasHeaders).catch(err => { console.error("Long CSV parse error:", err); return { data: [] }; })   // Catch error here
-          ]);
-          
-          const shortData = shortResult.data;
-          const longData = longResult.data;
-
-          console.log(`Short-term data rows: ${shortData.length}`);
-          console.log(`Long-term data rows: ${longData.length}`);
-          
-          if(shortFile.size > 0 && shortData.length === 0 && !hasHeaders) {
-               console.warn("Short term file provided but parsed as empty. Check CSV format?");
-          }
-          if(longFile.size > 0 && longData.length === 0 && !hasHeaders) {
-               console.warn("Long term file provided but parsed as empty. Check CSV format?");
-          }
-
-          // Generate the PDF
-          console.log("Generating PDF...");
-          const generatedPdfFile = await generate8949(f8949Bytes, year, shortData, longData);
-          console.log("PDF generation complete. Starting download...");
-          
-          // Download the generated file
-          download(generatedPdfFile);
-          console.log("Download initiated.");
-
+        await generate8949(f8949Bytes, year, shortData, longData).then(download);
       } catch (error) {
-          console.error("An error occurred during form processing:", error);
-          alert("An unexpected error occurred while generating the PDF. Please check the console for details.");
+        console.error('Error generating form:', error);
+        alert('An error occurred while generating the form. Please check your CSV files and try again.');
       } finally {
-          // Ensure UI is reset regardless of success or failure
-          spinner.style.display = 'none';
-          e.target.removeAttribute('data-submitting');
-          button.disabled = false; // Re-enable button
+        spinner.style.display = 'none';
+        e.target.removeAttribute('data-submitting');
       }
     });
   </script>
