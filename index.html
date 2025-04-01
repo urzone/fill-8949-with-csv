@@ -196,13 +196,24 @@
       background-color: #e2e6ea;
     }
 
-    .checkbox-group {
+    .checkbox-group, .radio-group {
       display: flex;
       align-items: center;
       margin-bottom: 1.5rem;
     }
+    
+    .radio-group {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.5rem;
+    }
+    
+    .radio-option {
+      display: flex;
+      align-items: center;
+    }
 
-    input[type="checkbox"] {
+    input[type="checkbox"], input[type="radio"] {
       margin-right: 0.5rem;
       width: 1.25rem;
       height: 1.25rem;
@@ -418,6 +429,20 @@
           <label for="headers">CSV data has headers</label>
         </div>
 
+        <div class="form-group">
+          <label>Output Format</label>
+          <div class="radio-group">
+            <div class="radio-option">
+              <input type="radio" id="format-form" name="format" value="form" checked>
+              <label for="format-form">Form with Fields (Editable)</label>
+            </div>
+            <div class="radio-option">
+              <input type="radio" id="format-static" name="format" value="static">
+              <label for="format-static">Static PDF (Compatible with all viewers)</label>
+            </div>
+          </div>
+        </div>
+
         <div class="button-container">
           <button type="submit">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 8px;">
@@ -448,7 +473,7 @@
 
   <script type="module">
     import Papa from 'https://cdn.jsdelivr.net/npm/papaparse@5.4.1/+esm';
-    import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString } from 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm';
+    import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString, rgb, StandardFonts } from 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm';
 
     const button = document.querySelector('button');
     const spinner = document.querySelector('.spinner');
@@ -495,7 +520,166 @@
       return page;
     }
 
-    async function generate8949(f8949Bytes, year, shortData, longData) {
+    async function generateStaticPDF(year, shortData, longData) {
+      // Create a new PDF document from scratch
+      const pdfDoc = await PDFDocument.create();
+      const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+      
+      // Function to create a page with table
+      const createTablePage = (title, data, isShortTerm) => {
+        const page = pdfDoc.addPage([612, 792]); // Letter size
+        const { width, height } = page.getSize();
+        const margin = 50;
+        
+        // Add title and form information
+        page.drawText('Form 8949', {
+          x: margin,
+          y: height - margin,
+          size: 16,
+          font: helveticaBold,
+        });
+        
+        page.drawText(`Sales and Other Dispositions of Capital Assets - ${year}`, {
+          x: margin,
+          y: height - margin - 20,
+          size: 12,
+          font: helveticaFont,
+        });
+        
+        page.drawText(title, {
+          x: margin,
+          y: height - margin - 40,
+          size: 12,
+          font: helveticaBold,
+        });
+        
+        // Draw table headers
+        const headers = [
+          'Description of property',
+          'Date acquired',
+          'Date sold',
+          'Proceeds',
+          'Cost basis',
+          'Adjustment code',
+          'Adjustment amount',
+          'Gain or (loss)'
+        ];
+        
+        const colWidths = [140, 70, 70, 60, 60, 60, 60, 60];
+        const rowHeight = 20;
+        let yPos = height - margin - 70;
+        
+        // Draw header row
+        let xPos = margin;
+        for (let i = 0; i < headers.length; i++) {
+          page.drawText(headers[i], {
+            x: xPos,
+            y: yPos,
+            size: 9,
+            font: helveticaBold,
+          });
+          xPos += colWidths[i];
+        }
+        
+        yPos -= rowHeight;
+        
+        // Draw horizontal line under headers
+        page.drawLine({
+          start: { x: margin, y: yPos + rowHeight - 5 },
+          end: { x: width - margin, y: yPos + rowHeight - 5 },
+          thickness: 1,
+          color: rgb(0, 0, 0),
+        });
+        
+        // Draw data rows
+        for (const row of data) {
+          xPos = margin;
+          for (let i = 0; i < row.length; i++) {
+            page.drawText(row[i] || '', {
+              x: xPos,
+              y: yPos,
+              size: 9,
+              font: helveticaFont,
+            });
+            xPos += colWidths[i];
+          }
+          
+          yPos -= rowHeight;
+          
+          // Draw horizontal line between rows
+          page.drawLine({
+            start: { x: margin, y: yPos + rowHeight - 5 },
+            end: { x: width - margin, y: yPos + rowHeight - 5 },
+            thickness: 0.5,
+            color: rgb(0.7, 0.7, 0.7),
+          });
+          
+          // Check if we need a new page
+          if (yPos < margin + rowHeight) {
+            page.drawText('(Continued on next page)', {
+              x: width / 2 - 60,
+              y: margin / 2,
+              size: 9,
+              font: helveticaFont,
+            });
+            
+            // Create a new page and reset position
+            const newPage = pdfDoc.addPage([612, 792]);
+            page = newPage;
+            yPos = height - margin - 40;
+            
+            // Add continuation header
+            page.drawText(`Form 8949 (${year}) - Continuation Sheet`, {
+              x: margin,
+              y: height - margin,
+              size: 12,
+              font: helveticaBold,
+            });
+            
+            // Redraw table headers
+            xPos = margin;
+            yPos -= 30;
+            for (let i = 0; i < headers.length; i++) {
+              page.drawText(headers[i], {
+                x: xPos,
+                y: yPos,
+                size: 9,
+                font: helveticaBold,
+              });
+              xPos += colWidths[i];
+            }
+            
+            yPos -= rowHeight;
+            
+            // Draw horizontal line under headers
+            page.drawLine({
+              start: { x: margin, y: yPos + rowHeight - 5 },
+              end: { x: width - margin, y: yPos + rowHeight - 5 },
+              thickness: 1,
+              color: rgb(0, 0, 0),
+            });
+          }
+        }
+      };
+      
+      // Create pages for short-term and long-term transactions
+      if (shortData.length > 0) {
+        createTablePage('Part I - Short-term transactions', shortData, true);
+      }
+      
+      if (longData.length > 0) {
+        createTablePage('Part II - Long-term transactions', longData, false);
+      }
+      
+      return pdfDoc.save().then(data => new File([data.buffer], `f8949_${year}_static`, { type: 'application/pdf' }));
+    }
+
+    async function generate8949(f8949Bytes, year, shortData, longData, isStatic = false) {
+      if (isStatic) {
+        return generateStaticPDF(year, shortData, longData);
+      }
+      
       const f8949 = await PDFDocument.load(f8949Bytes);
       const pagePromises = [];
       const chunkSize = 14;
@@ -523,7 +707,8 @@
       f8949.removePage(0);
       f8949.removePage(0);
 
-      return f8949.save().then(data => new File([data.buffer], `f8949_${year}_filled`, { type: 'application/pdf' }));
+      const filename = isStatic ? `f8949_${year}_static` : `f8949_${year}_filled`;
+      return f8949.save().then(data => new File([data.buffer], filename, { type: 'application/pdf' }));
     }
 
     function download(file) {
@@ -572,13 +757,26 @@
       const shortFile = form.get('short');
       const longFile = form.get('long');
       const hasHeaders = form.get('headers') === 'on';
-      const [f8949Bytes, shortData, longData] = await Promise.all([
-        fetch(`/forms/f8949--${year}.pdf`).then(r => r.arrayBuffer()),
-        parseCsv(shortFile, hasHeaders),
-        parseCsv(longFile, hasHeaders)
-      ]);
-
-      await generate8949(f8949Bytes, year, shortData, longData).then(download);
+      const isStatic = form.get('format') === 'static';
+      
+      try {
+        const [shortData, longData] = await Promise.all([
+          parseCsv(shortFile, hasHeaders),
+          parseCsv(longFile, hasHeaders)
+        ]);
+        
+        if (isStatic) {
+          // Generate static PDF without form fields
+          await generateStaticPDF(year, shortData, longData).then(download);
+        } else {
+          // Generate form-based PDF with fillable fields
+          const f8949Bytes = await fetch(`/forms/f8949--${year}.pdf`).then(r => r.arrayBuffer());
+          await generate8949(f8949Bytes, year, shortData, longData).then(download);
+        }
+      } catch (error) {
+        console.error('Error generating PDF:', error);
+        alert('An error occurred while generating the PDF. Please try again.');
+      }
 
       spinner.style.display = 'none';
       e.target.removeAttribute('data-submitting');
