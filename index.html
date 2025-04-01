@@ -721,4 +721,60 @@
           // Fetch PDF template first
           let f8949Bytes;
           try {
-              const response = await fetch(`/forms/f8
+              const response = await fetch(`/forms/f8949--${year}.pdf`);
+              if (!response.ok) {
+                  throw new Error(`Failed to fetch PDF form for year ${year}: ${response.statusText}`);
+              }
+              f8949Bytes = await response.arrayBuffer();
+              console.log(`Successfully fetched PDF for ${year}`);
+          } catch (fetchError) {
+              console.error("Error fetching PDF:", fetchError);
+              alert(`Could not load the Form 8949 PDF for ${year}. Please check the year selection or try again later.`);
+              spinner.style.display = 'none';
+              e.target.removeAttribute('data-submitting');
+              button.disabled = false;
+              return; // Stop execution
+          }
+
+          // Parse CSV files concurrently
+          const [shortResult, longResult] = await Promise.all([
+              parseCsv(shortFile, hasHeaders).catch(err => { console.error("Short CSV parse error:", err); return { data: [] }; }), // Catch error here
+              parseCsv(longFile, hasHeaders).catch(err => { console.error("Long CSV parse error:", err); return { data: [] }; })   // Catch error here
+          ]);
+          
+          const shortData = shortResult.data;
+          const longData = longResult.data;
+
+          console.log(`Short-term data rows: ${shortData.length}`);
+          console.log(`Long-term data rows: ${longData.length}`);
+          
+          if(shortFile.size > 0 && shortData.length === 0 && !hasHeaders) {
+               console.warn("Short term file provided but parsed as empty. Check CSV format?");
+          }
+          if(longFile.size > 0 && longData.length === 0 && !hasHeaders) {
+               console.warn("Long term file provided but parsed as empty. Check CSV format?");
+          }
+
+          // Generate the PDF
+          console.log("Generating PDF...");
+          const generatedPdfFile = await generate8949(f8949Bytes, year, shortData, longData);
+          console.log("PDF generation complete. Starting download...");
+          
+          // Download the generated file
+          download(generatedPdfFile);
+          console.log("Download initiated.");
+
+      } catch (error) {
+          console.error("An error occurred during form processing:", error);
+          alert("An unexpected error occurred while generating the PDF. Please check the console for details.");
+      } finally {
+          // Ensure UI is reset regardless of success or failure
+          spinner.style.display = 'none';
+          e.target.removeAttribute('data-submitting');
+          button.disabled = false; // Re-enable button
+      }
+    });
+  </script>
+</body>
+
+</html>
