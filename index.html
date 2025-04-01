@@ -475,189 +475,166 @@
   <script type="module">
     import Papa from 'https://cdn.jsdelivr.net/npm/papaparse@5.4.1/+esm';
     // Import necessary classes from pdf-lib
-    import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString } from 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm';
+    import { PDFDocument, PDFName /* , PDFArray, PDFDict, PDFString - Not needed currently */ } from 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm';
 
     // Get references to DOM elements
     const button = document.querySelector('button');
     const spinner = document.querySelector('.spinner');
     const formElement = document.querySelector('form'); // Reference the form element
 
-    // --- Annotation Cloning Logic ---
-    // Custom ID generator for unique field names after cloning
-    const annotationIds = (function* () {
-      let i = 0;
-      while (true) {
-        yield `clone${i++}`; // Use a prefix to avoid potential collisions
-      }
-    })();
-
-    // Function to clone annotations for copied pages, ensuring unique field names
-    function cloneAnnotations(page, sourceDoc) { // Pass sourceDoc context if needed
-      const context = page.doc.context; // Use the target document's context
-      const acroFormRef = page.doc.catalog.get(PDFName.of('AcroForm'));
-       if (!acroFormRef) {
-            console.warn("Target AcroForm not found, cannot add cloned fields.");
-           return;
-       }
-       const form = context.lookup(acroFormRef);
-       if (!(form instanceof PDFDict)) return;
-
-       let fields = form.lookupMaybe(PDFName.of('Fields'), PDFArray);
-       if (!fields) {
-            fields = context.obj([]);
-            form.set(PDFName.of('Fields'), fields);
+    // --- Updated Page Filling Logic ---
+    // Fills data into the fields of a specific page using the discovered naming pattern
+    async function fillPageData(page, data, termType) { // Added termType ('short' or 'long')
+       const form = page.doc.getForm();
+       if (!form) {
+           console.error('Cannot fill data: Form object not found on page associated with the final document.');
+           return; // Cannot proceed
        }
 
-      const annotsRef = page.node.get(PDFName.of('Annots'));
-      if (!annotsRef) return; // No annotations on this page
-       const annotations = context.lookup(annotsRef);
-       if (!(annotations instanceof PDFArray)) return;
-
-      for (let i = 0; i < annotations.size(); i++) {
-        const annotRef = annotations.get(i);
-        const originalAnnot = context.lookup(annotRef); // Annot is already in the target context due to page copy
-
-        if (originalAnnot instanceof PDFDict && originalAnnot.get(PDFName.of('Subtype')) === PDFName.of('Widget') ) {
-            // Found a form field widget
-             const oldT = originalAnnot.get(PDFName.of('T')); // Get existing T value (field name)
-             if(oldT) { // Only rename if it has a T value
-                 const newT = PDFString.of(`${oldT.asString()}_${annotationIds.next().value}`); // Append unique ID
-                 console.log(`Renaming field from ${oldT.asString()} to ${newT.asString()}`);
-                 originalAnnot.set(PDFName.of('T'), newT); // Update T value in the cloned annotation
-                 fields.push(annotRef); // Add reference to the AcroForm Fields array
-            } else {
-                 console.warn("Widget annotation found without a 'T' value (name). Cannot properly clone for AcroForm.");
-            }
-
-             // Optional: Update other properties if needed, e.g., Parent reference if part of a field hierarchy
-        }
-      }
-       // Update the NeedAppearances flag if fields were added
-       if (fields.size() > 0) {
-           form.set(PDFName.of('NeedAppearances'), context.obj(true));
-       }
-    }
-
-    // --- Page Filling Logic ---
-    // Fills data into the fields of a specific page (which is a copy)
-     async function fillPageData(page, data) {
-       const form = page.doc.getForm(); // Get form from the context of the target page's doc
+       const rowsPerPage = 14; // Assumed rows per page in the template
        const fieldsPerRow = 8; // Expected number of data columns per row
-       const rowsPerPage = 14; // Expected number of data rows the form template page supports
-       // TODO: Need a reliable way to map CSV column to actual PDF Field names on the template page.
-       // This is the hardest part. Let's *assume* a naming convention for now, e.g.,
-       // Row1_Col_a, Row1_Col_b, ..., Row1_Col_h
-       // Row2_Col_a, Row2_Col_b, ..., Row2_Col_h ... Row14_Col_h
 
-       for (let r = 0; r < data.length && r < rowsPerPage; r++) {
-           const rowData = data[r]; // Get data for this CSV row
-           for (let c = 0; c < rowData.length && c < fieldsPerRow; c++) {
+        // --- Determine PDF structure parts based on termType ---
+       const pageNum = (termType === 'short') ? 1 : 2; // *** ASSUMPTION: Long-term uses Page2 ***
+       const fieldBase = (termType === 'short') ? 'f1' : 'f2'; // *** ASSUMPTION: Long-term uses f2_ prefix ***
+       const basePath = `topmostSubform[0].Page${pageNum}[0].Table_Line1[0].`;
+
+       // --- Initial field indices for columns 0-7 ---
+       // *** VERIFY THESE BY INSPECTING YOUR PDF TEMPLATE ***
+       const initialIndices = [3, 4, 5, 6, 7, 8, 9, 10]; // Col 0 starts at 3, assuming others increment
+
+       console.log(`Filling data for ${termType} (Page ${pageNum}, Base ${fieldBase}) using basePath: ${basePath}`);
+
+       for (let r = 0; r < data.length && r < rowsPerPage; r++) { // r is 0-based row index
+           const rowData = data[r];
+           const rowNum = r + 1; // PDF Row number is 1-based (Row1, Row2...)
+
+           for (let c = 0; c < rowData.length && c < fieldsPerRow; c++) { // c is 0-based column index
                const cellValue = String(rowData[c] || ''); // Get cell value, ensure string
 
-               // *** Attempt to find the field based on assumed naming convention ***
-               // This needs to match EXACTLY how fields are named in your PDF template!
-               const fieldName = `Row${r + 1}_Col_${String.fromCharCode(97 + c)}`; // e.g., Row1_Col_a, Row1_Col_b ...
-                // You might need Row1.ColA, or Text1.0, Text1.1 etc. Check your template!
+               if (c >= initialIndices.length) {
+                    console.warn(`[Row ${rowNum}] Skipping column index ${c} - no initial index defined.`);
+                   continue;
+               }
+
+               // Calculate the specific index for this field
+               const initialIndex = initialIndices[c];
+               if (typeof initialIndex !== 'number') {
+                    console.warn(`[Row ${rowNum}, Col ${c}] Invalid initial index: ${initialIndex}`);
+                   continue; // Skip if the initial index is bad
+               }
+               const calculatedIndex = initialIndex + (r * 8); // Add 8 for each row offset
+
+               // Construct the full field name
+               const fieldName = `${basePath}Row${rowNum}[0].${fieldBase}_${calculatedIndex}[0]`;
 
                try {
-                    // Use getTextField, getCheckBox, etc. based on expected field type
-                    const field = form.getTextField(fieldName); // Assuming text fields
-                    field.setText(cellValue);
-                    // Optional: Mark field as needing appearance update? pdf-lib usually handles this.
-                    // field.updateAppearances(helveticaFont); // Requires font instance if needed
+                   // Use getTextField, assuming all table cells are text fields
+                   // In the future, might need getCheckBox, getRadioGroup, etc. if applicable
+                   const field = form.getTextField(fieldName);
+                   field.setText(cellValue);
+                    // console.log(`[Row ${rowNum}, Col ${c}] Set field "${fieldName}" to: ${cellValue}`); // Uncomment for intense debugging
+
                } catch (e) {
-                   // Field not found or wrong type - Log it and continue
-                    console.warn(`Could not find or set field named "${fieldName}" on page. Error: ${e.message}`);
-                    // If fields are just named sequentially like "Text1", "Text2", this gets much harder.
+                   // This error is CRITICAL if field names are wrong
+                   console.warn(`!! FAILED to find/set field: "${fieldName}". Check PDF template naming pattern/assumptions (Page, Base, Initial Index). Error: ${e.message}`);
                }
            }
        }
+        console.log(`Finished filling data attempt for ${termType}, page ${pageNum}. Check warnings above for issues.`);
    }
 
-    // --- Main PDF Generation Logic ---
+    // --- Main PDF Generation Logic (generate8949) ---
     // Generates the final PDF (either fillable or flattened static)
     async function generate8949(f8949Bytes, year, shortData, longData, isStatic = false) {
-      const sourceDoc = await PDFDocument.load(f8949Bytes);
-      const finalDoc = await PDFDocument.create(); // Create the target document we'll build
-      const chunkSize = 14; // Assumed rows per page in the template
+       const sourceDoc = await PDFDocument.load(f8949Bytes);
+       const finalDoc = await PDFDocument.create(); // Create the target document we'll build
+       const chunkSize = 14; // Assumed rows per page in the template
 
-      // Process Short-Term Data
-      if (shortData.length > 0) {
-          for (let i = 0; i < shortData.length; i += chunkSize) {
-              const chunk = shortData.slice(i, i + chunkSize);
-                // Copy page 0 (Short-term template) from source to final doc
-              const [copiedPage] = await finalDoc.copyPages(sourceDoc, [0]);
-              finalDoc.addPage(copiedPage);
-              // We need to fill data *after* copying the page into the finalDoc context
-              await fillPageData(copiedPage, chunk);
-              // Clone annotations to ensure fields are registered correctly in the finalDoc's AcroForm
-              // This step might be redundant if fillPageData works directly on finalDoc's form,
-              // but let's keep it for ensuring AcroForm field list is updated. Revisit if issues.
-              // cloneAnnotations(copiedPage, sourceDoc); // Pass sourceDoc if needed by clone logic
-          }
-      } else {
+       // Process Short-Term Data
+       console.log(`Processing ${shortData.length} short-term rows...`);
+       if (shortData.length > 0) {
+           for (let i = 0; i < shortData.length; i += chunkSize) {
+               const chunk = shortData.slice(i, i + chunkSize);
+               console.log(`   Copying short-term template page (index 0) for rows ${i+1}-${Math.min(i+chunkSize, shortData.length)}`);
+               const [copiedPage] = await finalDoc.copyPages(sourceDoc, [0]); // Copy template page 0
+               finalDoc.addPage(copiedPage);
+               // Fill data for 'short' term
+               await fillPageData(copiedPage, chunk, 'short'); // Pass 'short'
+           }
+       } else {
            // Add a blank short-term page if no data
+           console.log("No short-term data, adding blank template page (index 0).");
            const [copiedPage] = await finalDoc.copyPages(sourceDoc, [0]);
            finalDoc.addPage(copiedPage);
-           // Optionally clone annotations even on blank pages if structure matters
-           // cloneAnnotations(copiedPage, sourceDoc);
-      }
+       }
 
-      // Process Long-Term Data
-      if (longData.length > 0) {
-          for (let i = 0; i < longData.length; i += chunkSize) {
-              const chunk = longData.slice(i, i + chunkSize);
-              // Copy page 1 (Long-term template) from source to final doc
-               const [copiedPage] = await finalDoc.copyPages(sourceDoc, [1]);
+       // Process Long-Term Data
+       console.log(`Processing ${longData.length} long-term rows...`);
+       if (longData.length > 0) {
+           for (let i = 0; i < longData.length; i += chunkSize) {
+               const chunk = longData.slice(i, i + chunkSize);
+               console.log(`   Copying long-term template page (index 1) for rows ${i+1}-${Math.min(i+chunkSize, longData.length)}`);
+               const [copiedPage] = await finalDoc.copyPages(sourceDoc, [1]); // Copy template page 1
                finalDoc.addPage(copiedPage);
-               await fillPageData(copiedPage, chunk);
-               // cloneAnnotations(copiedPage, sourceDoc);
-          }
-      } else {
-          // Add a blank long-term page if no data
-          const [copiedPage] = await finalDoc.copyPages(sourceDoc, [1]);
-          finalDoc.addPage(copiedPage);
-           // cloneAnnotations(copiedPage, sourceDoc);
-      }
+               // Fill data for 'long' term
+               await fillPageData(copiedPage, chunk, 'long'); // Pass 'long'
+           }
+       } else {
+           // Add a blank long-term page if no data
+           console.log("No long-term data, adding blank template page (index 1).");
+           const [copiedPage] = await finalDoc.copyPages(sourceDoc, [1]);
+           finalDoc.addPage(copiedPage);
+       }
 
       // --- Flatten if Static PDF is requested ---
       if (isStatic) {
         console.log("Flattening PDF...");
         try {
-            const form = finalDoc.getForm(); // Get the form object
-            if (form) { // Check if the form exists
-                 // Ensure appearances are updated before flattening
-                 form.updateFieldAppearances(); // Consider calling this explicitly if needed
-                 form.flatten({ updateFieldAppearances: true }); // Call flatten on the form object
+            const form = finalDoc.getForm();
+            if (form) {
+                // Crucial: Ensure field appearances are generated *before* flattening
+                 form.updateFieldAppearances(); // Update appearances based on filled values
+                 // Now flatten. updateFieldAppearances: true here can sometimes cause issues,
+                 // so set it to false as we've already updated them.
+                 form.flatten({ updateFieldAppearances: false });
                  console.log("Flattening complete.");
              } else {
                  console.warn("No form found in the document to flatten.");
+                 // This might happen if the template truly has no AcroForm, but unlikely for IRS forms.
              }
         } catch (flattenError) {
-            console.error("Error during flattening:", flattenError);
-            alert(`Warning: Could not flatten the PDF. The downloaded file might still be editable or incomplete. Error: ${flattenError.message}`);
-            // Even if flattening fails, try to save the filled (but not flattened) version
+             console.error("Error during flattening:", flattenError);
+            // Consider more robust error reporting or fallback
+             alert(`Warning: Could not flatten the PDF. The downloaded file might still be editable or incomplete. Error: ${flattenError.message}`);
+             // Proceed to save the filled (but not flattened) attempt
         }
       } else {
-           // Ensure NeedAppearances might be needed for fillable forms if fields were modified
-           // pdf-lib usually handles this, but explicitly setting it can sometimes help
-           try {
-               const form = finalDoc.getForm();
-               if(form) {
-                    form.acroForm.dict.set(PDFName.of('NeedAppearances'), finalDoc.context.obj(true));
-               }
-           } catch(e) {
-               console.warn("Could not set NeedAppearances flag.", e);
-           }
+          // For fillable forms, ensure NeedAppearances flag is set if fields were modified
+          try {
+              const form = finalDoc.getForm();
+              if(form && form.acroForm) { // Check if acroForm exists
+                  // Set the flag to ensure viewer recalculates appearances if needed
+                  form.acroForm.dict.set(PDFName.of('NeedAppearances'), finalDoc.context.obj(true));
+                  // Optionally update appearances immediately for the fillable form too? Test if helpful.
+                  // form.updateFieldAppearances();
+              } else if (form) {
+                  console.warn("Form exists, but AcroForm dictionary not found. Cannot set NeedAppearances.")
+              }
+          } catch(e) {
+              console.warn("Could not get form or set NeedAppearances flag.", e);
+          }
       }
 
       // Define filename based on output type
       const filename = `f8949_${year}_${isStatic ? 'static' : 'filled'}.pdf`;
       console.log(`Saving PDF as: ${filename}`);
 
-      // Save the final document (now potentially flattened)
-      // The save operation happens regardless of flattening success/failure in the catch block
-      return finalDoc.save().then(data => new File([data.buffer], filename, { type: 'application/pdf' }));
+      // Save the final document
+      // We might not need updateFieldAppearances here if done previously, especially for static. Test effects.
+      return finalDoc.save({ updateFieldAppearances: !isStatic }).then(data =>
+          new File([data.buffer], filename, { type: 'application/pdf' })
+      );
     }
 
     // --- Helper Functions ---
@@ -683,7 +660,8 @@
           skipEmptyLines: 'greedy',
           complete: (results) => {
               if (results.errors && results.errors.length > 0) {
-                 return reject(new Error(`CSV Parsing Error (${results.errors[0].code}): ${results.errors[0].message} on row ${results.errors[0].row}`));
+                 console.error("CSV Parsing Errors:", results.errors);
+                 return reject(new Error(`CSV Parsing Error (${results.errors[0].code}): ${results.errors[0].message} on row ${results.errors[0].row + (hasHeaders ? 1 : 0)}`));
               }
               let data = results.data;
               if (hasHeaders && data.length > 0) {
@@ -692,7 +670,7 @@
               // Standardize row length (ensure 8 columns)
               const expectedColumns = 8;
               const standardizedData = data
-                 .filter(row => Array.isArray(row) && row.some(cell => cell !== null && cell !== undefined && cell !== '')) // Filter out completely empty rows
+                 .filter(row => Array.isArray(row) && row.some(cell => cell !== null && cell !== undefined && String(cell).trim() !== '')) // Filter out functionally empty rows
                  .map(row => {
                     const newRow = [...row];
                     while (newRow.length < expectedColumns) {
@@ -703,6 +681,7 @@
               resolve(standardizedData);
           },
           error: (error) => {
+              console.error("PapaParse Error:", error);
               reject(error);
           }
         });
@@ -728,7 +707,7 @@
       }
       formElement.setAttribute('data-submitting', '');
       spinner.style.display = 'inline-block';
-      let pdfGenerated = false;
+      let pdfGenerated = false; // Track if generation was successful
 
       try {
         const formData = new FormData(formElement);
@@ -738,9 +717,11 @@
         const hasHeaders = formData.get('headers') === 'on';
         const isStatic = formData.get('format') === 'static'; // Determine if static (flattened) output needed
 
-        if (!shortFile || shortFile.size === 0 || !longFile || longFile.size === 0) {
-            throw new Error('Please select both short-term and long-term CSV files.');
-        }
+        // Basic check for file selection
+        let fileError = null;
+         if (!shortFile || shortFile.size === 0) fileError = 'Please select the short-term CSV file.';
+         if (!longFile || longFile.size === 0) fileError = (fileError ? 'Please select both short-term and long-term CSV files.' : 'Please select the long-term CSV file.');
+         if (fileError) throw new Error(fileError);
 
         console.log('Parsing CSV files...');
         const [shortData, longData] = await Promise.all([
@@ -748,17 +729,24 @@
           parseCsv(longFile, hasHeaders)
         ]);
         console.log(`Parsed ${shortData.length} short-term rows, ${longData.length} long-term rows.`);
+        if (shortData.length === 0 && longData.length === 0) {
+            console.warn("Both CSV files resulted in zero data rows after parsing.");
+            // Optionally alert the user or proceed to generate blank forms
+            // throw new Error("Both CSV files appear to be empty or contain only headers.");
+        }
 
         // --- Fetch Template ---
         const templateUrl = `./forms/f8949--${year}.pdf`;
         console.log(`Fetching template: ${templateUrl}`);
         const response = await fetch(templateUrl);
         console.log(`Fetch response status: ${response.status}`);
-        if (!response.ok) {
-           throw new Error(`Failed to fetch PDF template: ${response.status} ${response.statusText}. Ensure '${templateUrl}' exists.`);
-        }
+         if (!response.ok || response.headers.get('content-type')?.toLowerCase().indexOf('application/pdf') === -1) {
+             const errorText = await response.text().catch(() => 'Could not read response body');
+             console.error(`Failed to fetch valid PDF template. Status: ${response.status} ${response.statusText}. Response body (might be HTML error page): ${errorText.substring(0, 500)}`);
+             throw new Error(`Failed to fetch PDF template for year ${year}. Status: ${response.status} ${response.statusText}. Please ensure '${templateUrl}' exists and is accessible.`);
+         }
         const f8949Bytes = await response.arrayBuffer();
-        console.log(`Template fetched (${f8949Bytes.byteLength} bytes).`);
+        console.log(`Template fetched (${(f8949Bytes.byteLength / 1024).toFixed(1)} KB).`);
 
         // --- Generate PDF (Fillable or Flattened) ---
         console.log(`Generating ${isStatic ? 'static (flattened)' : 'fillable'} PDF...`);
@@ -768,23 +756,26 @@
         if (finalPdfFile instanceof File) {
             console.log('PDF generated successfully:', finalPdfFile.name);
             download(finalPdfFile);
-            pdfGenerated = true;
+            pdfGenerated = true; // Mark success
         } else {
-            throw new Error('PDF generation failed to return a valid file.');
+             // This case shouldn't really happen if generate8949 resolves correctly
+            throw new Error('PDF generation process completed but did not return a valid file object.');
         }
 
       } catch (error) {
         console.error('Error during form processing:', error);
-        alert(`An error occurred: ${error.message || 'Please check console for details.'}`);
+        // Display a user-friendly message, potentially hiding technical details unless needed
+        alert(`An error occurred: ${error.message || 'Unknown error. Please check the browser console for more details.'}`);
+        // Optionally provide more specific guidance based on error type if possible
 
       } finally {
-        console.log('Form processing finished. Cleaning up...');
+        console.log('Form processing finished. Cleaning up UI...');
         spinner.style.display = 'none';
         formElement.removeAttribute('data-submitting');
         if (pdfGenerated) {
-            console.log("PDF download initiated.");
+            console.log("PDF download initiated successfully.");
         } else {
-             console.log("PDF generation/download did not complete successfully.");
+             console.log("PDF generation/download did not complete successfully due to errors.");
         }
       }
     });
