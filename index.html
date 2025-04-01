@@ -475,79 +475,106 @@
   <script type="module">
     import Papa from 'https://cdn.jsdelivr.net/npm/papaparse@5.4.1/+esm';
     // Import necessary classes from pdf-lib
-    import { PDFDocument, PDFName /* , PDFArray, PDFDict, PDFString - Not needed currently */ } from 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm';
+    import { PDFDocument, PDFName } from 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm';
 
     // Get references to DOM elements
     const button = document.querySelector('button');
     const spinner = document.querySelector('.spinner');
     const formElement = document.querySelector('form'); // Reference the form element
 
-    // --- Updated Page Filling Logic ---
-    // Fills data into the fields of a specific page using the discovered naming pattern
-    async function fillPageData(page, data, termType) { // Added termType ('short' or 'long')
+    // --- Page Filling Logic (Currently using incorrect names) ---
+    // !!! THIS FUNCTION WILL BE UPDATED AFTER DIAGNOSTIC STEP !!!
+    async function fillPageData(page, data, termType) {
        const form = page.doc.getForm();
-       if (!form) {
+        if (!form) {
            console.error('Cannot fill data: Form object not found on page associated with the final document.');
-           return; // Cannot proceed
-       }
+           return;
+        }
 
-       const rowsPerPage = 14; // Assumed rows per page in the template
-       const fieldsPerRow = 8; // Expected number of data columns per row
+       const rowsPerPage = 14;
+       const fieldsPerRow = 8;
 
-        // --- Determine PDF structure parts based on termType ---
-       const pageNum = (termType === 'short') ? 1 : 2; // *** ASSUMPTION: Long-term uses Page2 ***
-       const fieldBase = (termType === 'short') ? 'f1' : 'f2'; // *** ASSUMPTION: Long-term uses f2_ prefix ***
+        // --- INCORRECT PATTERN - TO BE REPLACED ---
+       const pageNum = (termType === 'short') ? 1 : 2;
+       const fieldBase = (termType === 'short') ? 'f1' : 'f2';
        const basePath = `topmostSubform[0].Page${pageNum}[0].Table_Line1[0].`;
+       const initialIndices = [3, 4, 5, 6, 7, 8, 9, 10]; // Assumed indices - Likely wrong
+       // --- END INCORRECT PATTERN ---
 
-       // --- Initial field indices for columns 0-7 ---
-       // *** VERIFY THESE BY INSPECTING YOUR PDF TEMPLATE ***
-       const initialIndices = [3, 4, 5, 6, 7, 8, 9, 10]; // Col 0 starts at 3, assuming others increment
+       console.log(`Attempting to fill data for ${termType} using CURRENTLY INCORRECT pattern: ${basePath}...`);
 
-       console.log(`Filling data for ${termType} (Page ${pageNum}, Base ${fieldBase}) using basePath: ${basePath}`);
-
-       for (let r = 0; r < data.length && r < rowsPerPage; r++) { // r is 0-based row index
+       for (let r = 0; r < data.length && r < rowsPerPage; r++) {
            const rowData = data[r];
-           const rowNum = r + 1; // PDF Row number is 1-based (Row1, Row2...)
+           const rowNum = r + 1;
 
-           for (let c = 0; c < rowData.length && c < fieldsPerRow; c++) { // c is 0-based column index
-               const cellValue = String(rowData[c] || ''); // Get cell value, ensure string
+           for (let c = 0; c < rowData.length && c < fieldsPerRow; c++) {
+               const cellValue = String(rowData[c] || '');
 
                if (c >= initialIndices.length) {
-                    console.warn(`[Row ${rowNum}] Skipping column index ${c} - no initial index defined.`);
+                   console.warn(`[Row ${rowNum}] Skipping column index ${c} - no initial index defined.`);
                    continue;
                }
 
-               // Calculate the specific index for this field
                const initialIndex = initialIndices[c];
                if (typeof initialIndex !== 'number') {
-                    console.warn(`[Row ${rowNum}, Col ${c}] Invalid initial index: ${initialIndex}`);
-                   continue; // Skip if the initial index is bad
+                   console.warn(`[Row ${rowNum}, Col ${c}] Invalid initial index: ${initialIndex}`);
+                   continue;
                }
-               const calculatedIndex = initialIndex + (r * 8); // Add 8 for each row offset
-
-               // Construct the full field name
-               const fieldName = `${basePath}Row${rowNum}[0].${fieldBase}_${calculatedIndex}[0]`;
+               const calculatedIndex = initialIndex + (r * 8);
+               const fieldName = `${basePath}Row${rowNum}[0].${fieldBase}_${calculatedIndex}[0]`; // INCORRECT NAME GENERATION
 
                try {
-                   // Use getTextField, assuming all table cells are text fields
-                   // In the future, might need getCheckBox, getRadioGroup, etc. if applicable
                    const field = form.getTextField(fieldName);
                    field.setText(cellValue);
-                    // console.log(`[Row ${rowNum}, Col ${c}] Set field "${fieldName}" to: ${cellValue}`); // Uncomment for intense debugging
-
                } catch (e) {
-                   // This error is CRITICAL if field names are wrong
-                   console.warn(`!! FAILED to find/set field: "${fieldName}". Check PDF template naming pattern/assumptions (Page, Base, Initial Index). Error: ${e.message}`);
+                   // This error is expected until the correct names are used
+                   console.warn(`!! FAILED to find/set field (using incorrect name): "${fieldName}". Check PDF template pattern. Error: ${e.message}`);
                }
            }
        }
-        console.log(`Finished filling data attempt for ${termType}, page ${pageNum}. Check warnings above for issues.`);
+        console.log(`Finished attempting fill for ${termType} (using incorrect names).`);
    }
 
     // --- Main PDF Generation Logic (generate8949) ---
-    // Generates the final PDF (either fillable or flattened static)
+    // Generates the final PDF AND includes diagnostic code to list fields
     async function generate8949(f8949Bytes, year, shortData, longData, isStatic = false) {
        const sourceDoc = await PDFDocument.load(f8949Bytes);
+
+       // --- BEGIN DIAGNOSTIC BLOCK ---
+       // This block lists all detectable form fields in the loaded template.
+       console.log("--- DIAGNOSTIC: Listing Fields from Template PDF ---");
+       try {
+           const form = sourceDoc.getForm();
+           if (form) {
+               const fields = form.getFields();
+               console.log(`[DIAGNOSTIC] Found ${fields.length} fields in the template:`);
+               fields.forEach(field => {
+                   try {
+                        // Attempt to get type and name safely
+                       const type = field.constructor.name; // e.g., PDFTextField, PDFCheckBox
+                       const name = field.getName();      // The crucial field name!
+                       console.log(`  [DIAGNOSTIC] - Name: "${name}", Type: ${type}`);
+                   } catch (fieldError) {
+                       console.warn(`  [DIAGNOSTIC] - Error reading field properties: ${fieldError.message}`, field);
+                   }
+               });
+                // Optional: List all fields from AcroForm dictionary (more raw)
+                // const acroForm = form.acroForm;
+                // if (acroForm && acroForm.dict.has(PDFName.of('Fields'))) {
+                //     const fieldArray = acroForm.dict.lookup(PDFName.of('Fields'), PDFArray);
+                //     console.log(`[DIAGNOSTIC] Raw AcroForm fields array size: ${fieldArray.size()}`);
+                //     // Further inspection could iterate through fieldArray elements if needed
+                // }
+
+           } else {
+               console.log("[DIAGNOSTIC] Template does not contain a form according to pdf-lib.");
+           }
+       } catch (e) {
+           console.error("[DIAGNOSTIC] Error trying to list fields:", e);
+       }
+       console.log("--- END DIAGNOSTIC ---");
+       // --- END DIAGNOSTIC BLOCK ---
+
        const finalDoc = await PDFDocument.create(); // Create the target document we'll build
        const chunkSize = 14; // Assumed rows per page in the template
 
@@ -559,8 +586,8 @@
                console.log(`   Copying short-term template page (index 0) for rows ${i+1}-${Math.min(i+chunkSize, shortData.length)}`);
                const [copiedPage] = await finalDoc.copyPages(sourceDoc, [0]); // Copy template page 0
                finalDoc.addPage(copiedPage);
-               // Fill data for 'short' term
-               await fillPageData(copiedPage, chunk, 'short'); // Pass 'short'
+               // Fill data for 'short' term - EXPECT ERRORS HERE until names fixed
+               await fillPageData(copiedPage, chunk, 'short');
            }
        } else {
            // Add a blank short-term page if no data
@@ -577,8 +604,8 @@
                console.log(`   Copying long-term template page (index 1) for rows ${i+1}-${Math.min(i+chunkSize, longData.length)}`);
                const [copiedPage] = await finalDoc.copyPages(sourceDoc, [1]); // Copy template page 1
                finalDoc.addPage(copiedPage);
-               // Fill data for 'long' term
-               await fillPageData(copiedPage, chunk, 'long'); // Pass 'long'
+               // Fill data for 'long' term - EXPECT ERRORS HERE until names fixed
+               await fillPageData(copiedPage, chunk, 'long');
            }
        } else {
            // Add a blank long-term page if no data
@@ -593,31 +620,30 @@
         try {
             const form = finalDoc.getForm();
             if (form) {
-                // Crucial: Ensure field appearances are generated *before* flattening
-                 form.updateFieldAppearances(); // Update appearances based on filled values
-                 // Now flatten. updateFieldAppearances: true here can sometimes cause issues,
-                 // so set it to false as we've already updated them.
+                 // Ensure appearances generated before flattening
+                 try {
+                    form.updateFieldAppearances();
+                 } catch (updateError) {
+                     console.warn("Warning: Error updating field appearances before flattening. Flattening may use default appearances.", updateError);
+                 }
+                 // Flatten, preventing another appearance update
                  form.flatten({ updateFieldAppearances: false });
                  console.log("Flattening complete.");
              } else {
                  console.warn("No form found in the document to flatten.");
-                 // This might happen if the template truly has no AcroForm, but unlikely for IRS forms.
              }
         } catch (flattenError) {
              console.error("Error during flattening:", flattenError);
-            // Consider more robust error reporting or fallback
              alert(`Warning: Could not flatten the PDF. The downloaded file might still be editable or incomplete. Error: ${flattenError.message}`);
-             // Proceed to save the filled (but not flattened) attempt
         }
       } else {
-          // For fillable forms, ensure NeedAppearances flag is set if fields were modified
+          // --- NeedAppearances Flag for Fillable PDF ---
           try {
               const form = finalDoc.getForm();
-              if(form && form.acroForm) { // Check if acroForm exists
-                  // Set the flag to ensure viewer recalculates appearances if needed
+              if(form && form.acroForm) {
                   form.acroForm.dict.set(PDFName.of('NeedAppearances'), finalDoc.context.obj(true));
-                  // Optionally update appearances immediately for the fillable form too? Test if helpful.
-                  // form.updateFieldAppearances();
+                   // Optionally update appearances here too? Test if necessary for fillable forms.
+                   // try { form.updateFieldAppearances(); } catch (uae) { console.warn('Error updating fillable appearances', uae); }
               } else if (form) {
                   console.warn("Form exists, but AcroForm dictionary not found. Cannot set NeedAppearances.")
               }
@@ -626,12 +652,11 @@
           }
       }
 
-      // Define filename based on output type
-      const filename = `f8949_${year}_${isStatic ? 'static' : 'filled'}.pdf`;
+      // --- Save Document ---
+      const filename = `f8949_${year}_${isStatic ? 'static' : 'filled'}_DIAGNOSTIC.pdf`; // Added DIAGNOSTIC to name
       console.log(`Saving PDF as: ${filename}`);
 
-      // Save the final document
-      // We might not need updateFieldAppearances here if done previously, especially for static. Test effects.
+      // Save the final document. Update appearances maybe only needed for fillable, test.
       return finalDoc.save({ updateFieldAppearances: !isStatic }).then(data =>
           new File([data.buffer], filename, { type: 'application/pdf' })
       );
@@ -661,13 +686,15 @@
           complete: (results) => {
               if (results.errors && results.errors.length > 0) {
                  console.error("CSV Parsing Errors:", results.errors);
-                 return reject(new Error(`CSV Parsing Error (${results.errors[0].code}): ${results.errors[0].message} on row ${results.errors[0].row + (hasHeaders ? 1 : 0)}`));
+                 // Report first error found
+                 const firstError = results.errors[0];
+                 return reject(new Error(`CSV Parsing Error (${firstError.code}): ${firstError.message} on row ${firstError.row + (hasHeaders ? 2 : 1)}`)); // Adjust row number based on header
               }
               let data = results.data;
               if (hasHeaders && data.length > 0) {
                 data.shift(); // Remove header row
               }
-              // Standardize row length (ensure 8 columns)
+              // Standardize row length (ensure 8 columns) and filter empty rows
               const expectedColumns = 8;
               const standardizedData = data
                  .filter(row => Array.isArray(row) && row.some(cell => cell !== null && cell !== undefined && String(cell).trim() !== '')) // Filter out functionally empty rows
@@ -700,14 +727,16 @@
 
     // Form Submission Handler
     formElement.addEventListener('submit', async (e) => {
-      e.preventDefault();
+      e.preventDefault(); // Prevent default form submission
 
+      // Prevent multiple submissions
       if (formElement.hasAttribute('data-submitting')) {
+        console.log("Submission already in progress.");
         return;
       }
-      formElement.setAttribute('data-submitting', '');
-      spinner.style.display = 'inline-block';
-      let pdfGenerated = false; // Track if generation was successful
+      formElement.setAttribute('data-submitting', ''); // Set submitting flag
+      spinner.style.display = 'inline-block';          // Show spinner
+      let pdfGenerated = false;                        // Track if generation was successful
 
       try {
         const formData = new FormData(formElement);
@@ -715,14 +744,15 @@
         const shortFile = formData.get('short');
         const longFile = formData.get('long');
         const hasHeaders = formData.get('headers') === 'on';
-        const isStatic = formData.get('format') === 'static'; // Determine if static (flattened) output needed
+        const isStatic = formData.get('format') === 'static';
 
-        // Basic check for file selection
+        // --- Basic File Validation ---
         let fileError = null;
          if (!shortFile || shortFile.size === 0) fileError = 'Please select the short-term CSV file.';
-         if (!longFile || longFile.size === 0) fileError = (fileError ? 'Please select both short-term and long-term CSV files.' : 'Please select the long-term CSV file.');
+         if (!longFile || longFile.size === 0) fileError = (fileError ? fileError + '\nPlease also select the long-term CSV file.' : 'Please select the long-term CSV file.');
          if (fileError) throw new Error(fileError);
 
+        // --- Parse CSV Data ---
         console.log('Parsing CSV files...');
         const [shortData, longData] = await Promise.all([
           parseCsv(shortFile, hasHeaders),
@@ -730,52 +760,54 @@
         ]);
         console.log(`Parsed ${shortData.length} short-term rows, ${longData.length} long-term rows.`);
         if (shortData.length === 0 && longData.length === 0) {
-            console.warn("Both CSV files resulted in zero data rows after parsing.");
-            // Optionally alert the user or proceed to generate blank forms
-            // throw new Error("Both CSV files appear to be empty or contain only headers.");
+            console.warn("Both CSV files resulted in zero data rows after parsing. Check CSV content and header row setting.");
+             // Allow proceeding to generate potentially blank form + diagnostics
+             // alert("Warning: Both CSV files appear to be empty or contain only headers. Proceeding anyway.");
         }
 
-        // --- Fetch Template ---
+        // --- Fetch the Correct PDF Template ---
         const templateUrl = `./forms/f8949--${year}.pdf`;
         console.log(`Fetching template: ${templateUrl}`);
         const response = await fetch(templateUrl);
         console.log(`Fetch response status: ${response.status}`);
          if (!response.ok || response.headers.get('content-type')?.toLowerCase().indexOf('application/pdf') === -1) {
-             const errorText = await response.text().catch(() => 'Could not read response body');
-             console.error(`Failed to fetch valid PDF template. Status: ${response.status} ${response.statusText}. Response body (might be HTML error page): ${errorText.substring(0, 500)}`);
-             throw new Error(`Failed to fetch PDF template for year ${year}. Status: ${response.status} ${response.statusText}. Please ensure '${templateUrl}' exists and is accessible.`);
+             let errorDetail = `Status: ${response.status} ${response.statusText}`;
+             try {
+                 const text = await response.text();
+                 errorDetail += `. Response preview: ${text.substring(0, 200)}`; // Show beginning of non-PDF response
+             } catch { /* ignored */ }
+             console.error(`Failed to fetch valid PDF template. ${errorDetail}`);
+             throw new Error(`Failed to fetch PDF template for year ${year}. Check if '${templateUrl}' exists and is accessible. ${errorDetail}`);
          }
         const f8949Bytes = await response.arrayBuffer();
-        console.log(`Template fetched (${(f8949Bytes.byteLength / 1024).toFixed(1)} KB).`);
+        console.log(`Template fetched (${(f8949Bytes.byteLength / 1024).toFixed(1)} KB). Running field diagnostics...`);
 
         // --- Generate PDF (Fillable or Flattened) ---
-        console.log(`Generating ${isStatic ? 'static (flattened)' : 'fillable'} PDF...`);
-        // generate8949 now handles both cases based on isStatic flag
+        // This function now includes the diagnostic code to list field names first
         const finalPdfFile = await generate8949(f8949Bytes, year, shortData, longData, isStatic);
 
+        // --- Download the Result ---
         if (finalPdfFile instanceof File) {
-            console.log('PDF generated successfully:', finalPdfFile.name);
+            console.log('PDF generation process completed. Downloading:', finalPdfFile.name);
             download(finalPdfFile);
             pdfGenerated = true; // Mark success
         } else {
-             // This case shouldn't really happen if generate8949 resolves correctly
             throw new Error('PDF generation process completed but did not return a valid file object.');
         }
 
       } catch (error) {
         console.error('Error during form processing:', error);
-        // Display a user-friendly message, potentially hiding technical details unless needed
-        alert(`An error occurred: ${error.message || 'Unknown error. Please check the browser console for more details.'}`);
-        // Optionally provide more specific guidance based on error type if possible
+        alert(`An error occurred: ${error.message}\n\nPlease check the browser console (F12) for more details, especially the [DIAGNOSTIC] field list.`);
+        // The diagnostic output should still be in the console, even if parsing/filling failed later
 
       } finally {
         console.log('Form processing finished. Cleaning up UI...');
-        spinner.style.display = 'none';
-        formElement.removeAttribute('data-submitting');
+        spinner.style.display = 'none';                 // Hide spinner
+        formElement.removeAttribute('data-submitting'); // Clear submitting flag
         if (pdfGenerated) {
-            console.log("PDF download initiated successfully.");
+            console.log("PDF download should have initiated.");
         } else {
-             console.log("PDF generation/download did not complete successfully due to errors.");
+             console.log("PDF generation/download did not complete successfully due to errors. Check console.");
         }
       }
     });
