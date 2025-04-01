@@ -624,26 +624,39 @@
       if (isStatic) {
         console.log("Flattening PDF...");
         try {
-            // Disable field updates after flattening
-            finalDoc.getForm().acroForm.dict.delete(PDFName.of('NeedAppearances'));
-            finalDoc.flatten({ updateFieldAppearances: true }); // Regenerate appearances before flattening
-             console.log("Flattening complete.");
+            const form = finalDoc.getForm(); // Get the form object
+            if (form) { // Check if the form exists
+                 // Ensure appearances are updated before flattening
+                 form.updateFieldAppearances(); // Consider calling this explicitly if needed
+                 form.flatten({ updateFieldAppearances: true }); // Call flatten on the form object
+                 console.log("Flattening complete.");
+             } else {
+                 console.warn("No form found in the document to flatten.");
+             }
         } catch (flattenError) {
-             console.error("Error during flattening:", flattenError);
-            // Decide how to handle: maybe alert user, or proceed with unflattened?
-             alert(`Warning: Could not flatten the PDF. The downloaded file might still be editable. Error: ${flattenError.message}`);
+            console.error("Error during flattening:", flattenError);
+            alert(`Warning: Could not flatten the PDF. The downloaded file might still be editable or incomplete. Error: ${flattenError.message}`);
+            // Even if flattening fails, try to save the filled (but not flattened) version
         }
       } else {
-          // Ensure NeedAppearances is set for fillable forms if fields were added/modified
-          // (pdf-lib might handle this automatically when fields are modified)
-          finalDoc.getForm().acroForm.dict.set(PDFName.of('NeedAppearances'), finalDoc.context.obj(true));
+           // Ensure NeedAppearances might be needed for fillable forms if fields were modified
+           // pdf-lib usually handles this, but explicitly setting it can sometimes help
+           try {
+               const form = finalDoc.getForm();
+               if(form) {
+                    form.acroForm.dict.set(PDFName.of('NeedAppearances'), finalDoc.context.obj(true));
+               }
+           } catch(e) {
+               console.warn("Could not set NeedAppearances flag.", e);
+           }
       }
 
       // Define filename based on output type
       const filename = `f8949_${year}_${isStatic ? 'static' : 'filled'}.pdf`;
       console.log(`Saving PDF as: ${filename}`);
 
-      // Save the final document (either flattened or fillable)
+      // Save the final document (now potentially flattened)
+      // The save operation happens regardless of flattening success/failure in the catch block
       return finalDoc.save().then(data => new File([data.buffer], filename, { type: 'application/pdf' }));
     }
 
