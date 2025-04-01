@@ -19,236 +19,445 @@
   <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/pako@1.0.11/+esm">
   <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/@pdf-lib/standard-fonts@1.0.0/+esm">
   <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/@pdf-lib/upng@1.0.1/+esm">
+  <!-- Bootstrap CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Font Awesome for icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
   <title>Fill IRS Form 8949 with CSV</title>
   <style>
     :root {
+      --primary-color: #90EE90;
+      --primary-dark: #50C878;
+      --secondary-color: #32CD32;
+      --accent-color: #00FF7F;
+      --dark-bg: #121212;
+      --darker-bg: #0a0a0a;
+      --medium-bg: #1e1e1e;
+      --light-bg: #2a2a2a;
+      --dark-text: #e0e0e0;
+      --light-text: #f8f9fa;
+      --muted-text: #a0a0a0;
+      --card-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+      --gradient-1: linear-gradient(135deg, #121212, #1a1a1a);
+      --gradient-2: linear-gradient(135deg, #90EE90, #50C878);
+    }
+
+    body {
       font-family: 'Inter', sans-serif;
+      background: var(--darker-bg);
+      min-height: 100vh;
+      padding: 2rem 0;
+      color: var(--light-text);
     }
 
     @supports (font-variation-settings: normal) {
-      :root {
+      body {
         font-family: 'Inter var', sans-serif;
       }
     }
 
-    body {
-      background: hsl(216deg 50% 90%);
-      color: hsl(216deg 50% 10%);
-      min-block-size: 100dvb;
-      inline-size: calc(100% - 32px);
-      margin-inline: auto;
-      margin-block: 0;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      gap: 16px;
+    .app-container {
+      max-width: 800px;
+      margin: 0 auto;
     }
 
-    section.info {
-      margin-block-start: 16px;
+    .app-card {
+      background-color: rgba(30, 30, 30, 0.95);
+      border-radius: 16px;
+      box-shadow: var(--card-shadow);
+      padding: 2rem;
+      margin-bottom: 1.5rem;
+      transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      border: 1px solid rgba(144, 238, 144, 0.2);
+      backdrop-filter: blur(10px);
     }
 
-    p {
-      margin: 0;
+    .app-card:hover {
+      transform: translateY(-8px);
+      box-shadow: 0 15px 30px rgba(0, 0, 0, 0.5);
+      border-color: rgba(144, 238, 144, 0.5);
+      background-color: rgba(35, 35, 35, 0.95);
     }
 
     h1 {
-      margin: 0;
-      margin-block-end: 24px;
-      font-size: 2rem;
+      background: var(--gradient-2);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      font-weight: 800;
+      margin-bottom: 1.5rem;
+      border-bottom: 2px solid;
+      border-image: var(--gradient-2) 1;
+      padding-bottom: 0.5rem;
+      letter-spacing: -0.5px;
+      text-shadow: 0 0 10px rgba(144, 238, 144, 0.3);
     }
 
-    .source {
-      margin-block-start: 24px;
+    .btn-primary {
+      background: var(--gradient-2);
+      border: 1px solid rgba(144, 238, 144, 0.3);
+      transition: all 0.4s ease;
+      position: relative;
+      z-index: 1;
+      overflow: hidden;
+      color: var(--darker-bg);
+      font-weight: 600;
+      text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
+    }
+    
+    .btn-primary::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, #50C878, #32CD32);
+      z-index: -1;
+      transition: opacity 0.4s ease;
+      opacity: 0;
+      box-shadow: 0 0 15px rgba(144, 238, 144, 0.5);
     }
 
-    a {
-      color: hsl(216deg 50% 40%);
-      font-weight: 700;
-      text-decoration: none;
+    .btn-primary:hover, .btn-primary:focus {
+      transform: translateY(-3px) scale(1.02);
+      box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+    }
+    
+    .btn-primary:hover::before {
+      opacity: 1;
     }
 
-    a:hover,
-    a:focus {
-      text-decoration: underline 0.1em;
-      text-underline-offset: 0.15em;
+    .form-control, .form-select {
+      border-radius: 12px;
+      border: 2px solid rgba(144, 238, 144, 0.3);
+      padding: 0.75rem 1rem;
+      transition: all 0.3s ease;
+      background-color: rgba(20, 20, 20, 0.8);
+      color: var(--light-text);
     }
 
-    main {
-      margin-block-end: 16px;
+    .form-control:focus, .form-select:focus {
+      border-color: var(--accent-color);
+      box-shadow: 0 0 0 0.25rem rgba(144, 238, 144, 0.25);
+      transform: translateY(-2px);
+      background-color: rgba(25, 25, 25, 1);
+      color: var(--light-text);
     }
 
-    svg {
-      block-size: 1rem;
-      inline-size: 1rem;
-      /* Optically center the SVG */
-      transform: translateY(3px);
+    .form-check-input:checked {
+      background: var(--gradient-2);
+      border-color: var(--accent-color);
+      box-shadow: 0 0 5px rgba(144, 238, 144, 0.5);
+    }
+    
+    .form-check-input {
+      background-color: rgba(20, 20, 20, 0.8);
+      border: 1px solid rgba(144, 238, 144, 0.3);
     }
 
-    form {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
+    .disclaimer, .privacy {
+      font-size: 0.9rem;
+      color: var(--muted-text);
+    }
+    
+    .alert {
+      border-radius: 12px;
+      box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+      border: 1px solid rgba(144, 238, 144, 0.15);
+      background-color: rgba(25, 25, 25, 0.7);
+      color: var(--light-text);
+    }
+    
+    .alert-warning {
+      background: linear-gradient(to right, rgba(144, 238, 144, 0.1), rgba(50, 205, 50, 0.05));
+      border-left: 3px solid rgba(144, 238, 144, 0.4);
+    }
+    
+    .alert-info {
+      background: linear-gradient(to right, rgba(50, 205, 50, 0.05), rgba(144, 238, 144, 0.1));
+      border-left: 3px solid rgba(144, 238, 144, 0.4);
     }
 
-    label {
-      inline-size: fit-content;
-    }
-
-    label:not([for="headers"]) {
-      /* Expand clickable area to cover flex gap */
-      padding-block-end: 8px;
-      margin-block-end: -8px;
-    }
-
-    label[for="headers"] {
-      padding-inline-start: 4px;
-      margin-inline-start: -4px;
-    }
-
-    input {
-      inline-size: fit-content;
-      font-size: 1rem;
-    }
-
-    input[type="checkbox"] {
-      width: 16px;
-      aspect-ratio: 1;
-      margin: 0;
-    }
-
-    select,
-    button,
-    input::file-selector-button {
-      inline-size: fit-content;
-      color: inherit;
-      font-size: 1rem;
-      border: 1px solid hsl(216deg 50% 50%);
-      border-radius: 4px;
-      padding: 4px 8px;
-      transition: filter 400ms;
-    }
-
-    :is(label, select, input, button, input::file-selector-button):is(:hover, :focus) {
-      cursor: pointer;
-      filter: brightness(105%);
-      transition: filter 200ms;
-    }
-
-    [data-submitting] button {
-      cursor: not-allowed;
-      background: hsl(216deg 5% 85% / 0.9);
-      filter: unset;
-      transition: unset;
-    }
-
-    ol {
-      margin: 0;
-      margin-block-end: 24px;
-    }
-
-    .card {
-      align-self: center;
-      inline-size: min(60ch, 100% - 32px);
-      background: hsl(216deg 50% 85%);
-      border: 1px solid hsl(216deg 50% 50%);
-      border-radius: 4px;
-      padding: 16px;
-    }
-
-    .disclaimer,
-    .privacy,
     .directions {
-      color: hsl(216deg 50% 25%);
+      background: linear-gradient(to right, rgba(20, 20, 20, 0.9), rgba(30, 30, 30, 0.9));
+      border-left: 4px solid;
+      border-image: var(--gradient-2) 1;
+      padding: 1.25rem;
+      border-radius: 0 12px 12px 0;
+      box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2), 0 0 10px rgba(144, 238, 144, 0.1);
+      color: var(--light-text);
     }
 
-    .inline-container {
-      display: flex;
-      align-items: center;
-      gap: 4px;
+    .directions ol {
+      padding-left: 1.5rem;
+      margin-bottom: 0;
     }
 
-    .inline-spinner {
+    .directions li {
+      margin-bottom: 0.5rem;
+    }
+
+    .directions li:last-child {
+      margin-bottom: 0;
+    }
+
+    .template-link {
+      color: var(--primary-color);
+      text-decoration: none;
+      font-weight: 600;
+      transition: all 0.3s ease;
+      position: relative;
+      padding: 0 2px;
+      text-shadow: 0 0 5px rgba(144, 238, 144, 0.3);
+    }
+
+    .template-link:hover {
+      color: var(--accent-color);
+    }
+    
+    .template-link::after {
+      content: '';
+      position: absolute;
+      width: 100%;
+      height: 2px;
+      bottom: -2px;
+      left: 0;
+      background: var(--gradient-2);
+      transform: scaleX(0);
+      transform-origin: bottom right;
+      transition: transform 0.3s ease;
+    }
+    
+    .template-link:hover::after {
+      transform: scaleX(1);
+      transform-origin: bottom left;
+    }
+
+    .spinner-border {
       display: none;
-      box-sizing: border-box;
-      block-size: 1em;
-      inline-size: 1em;
-      border: 0.25em solid transparent;
-      border-block-start: 0.25em solid hsl(216deg 50% 40%);
-      border-radius: 50%;
-      animation: spin 1s infinite;
+      width: 1.5rem;
+      height: 1.5rem;
+      margin-left: 0.5rem;
     }
 
-    @keyframes spin {
-      100% {
-        transform: rotate(360deg);
-      }
+    .file-upload {
+      position: relative;
+      overflow: hidden;
+      margin-bottom: 1rem;
+    }
+
+    .file-upload input[type=file] {
+      font-size: 100px;
+      position: absolute;
+      left: 0;
+      top: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
+
+    .file-upload-label {
+      display: block;
+      background-color: rgba(20, 20, 20, 0.7);
+      border: 2px dashed rgba(144, 238, 144, 0.3);
+      border-radius: 12px;
+      padding: 1.25rem;
+      text-align: center;
+      transition: all 0.4s ease;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      color: var(--light-text);
+    }
+
+    .file-upload-label:hover {
+      background-color: rgba(30, 30, 30, 0.9);
+      border-color: var(--accent-color);
+      transform: translateY(-3px);
+      box-shadow: 0 5px 15px rgba(144, 238, 144, 0.2);
+    }
+    
+    .file-upload-label::before {
+      content: '';
+      position: absolute;
+      top: -10px;
+      left: -10px;
+      right: -10px;
+      bottom: -10px;
+      background: linear-gradient(45deg, rgba(144, 238, 144, 0.1), rgba(50, 205, 50, 0.1));
+      z-index: -1;
+      transform: scale(0.95);
+      transition: transform 0.4s ease;
+      box-shadow: 0 0 20px rgba(144, 238, 144, 0.1);
+    }
+    
+    .file-upload-label:hover::before {
+      transform: scale(1);
+    }
+
+    .file-name {
+      margin-top: 0.5rem;
+      font-size: 0.9rem;
+      color: var(--muted-text);
+      word-break: break-all;
+    }
+
+    .github-link {
+      display: inline-flex;
+      align-items: center;
+      color: var(--primary-color);
+      text-decoration: none;
+      font-weight: 600;
+      transition: all 0.3s ease;
+      padding: 8px 16px;
+      border-radius: 30px;
+      background: rgba(255, 255, 255, 0.2);
+      backdrop-filter: blur(5px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .github-link:hover {
+      color: var(--accent-color);
+      transform: translateY(-3px);
+      box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+      background: rgba(255, 255, 255, 0.3);
+    }
+
+    .github-link i {
+      margin-right: 0.5rem;
+    }
+
+    footer {
+      text-align: center;
+      margin-top: 2rem;
+      color: rgba(255, 255, 255, 0.8);
+      font-size: 0.9rem;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+      padding: 1rem 0;
     }
   </style>
 </head>
 
 <body>
-  <section class="info card">
-    <h1>Fill IRS Form 8949 with CSV</h1>
-    <p class="disclaimer"><b>Disclaimer:</b> the author of this tool is not responsible for any errors or omissions, or for the results obtained from the use of this tool. All outputs are provided "as is", with no guarantee of completeness, accuracy, or of the results obtained from the use of this tool, and without warranty of any kind. The output from this tool is provided with the understanding that the author is not herein engaged in rendering legal, accounting, tax, or other professional advice and services.</p>
-    <p class="privacy"><b>Privacy:</b> the CSV parsing and PDF filling operations occur in your web browser. Your CSV data does not leave your computer.</p>
-    <p class="source"><a href="https://github.com/ardislu/fill-8949-with-csv">Click here to view this tool's source code on GitHub.</a></p>
-  </section>
+  <div class="container app-container">
+    <div class="app-card">
+      <h1 class="text-center">Fill IRS Form 8949 with CSV</h1>
+      <div class="disclaimer mb-3">
+        <div class="alert alert-warning">
+          <h5><i class="fas fa-exclamation-triangle me-2"></i>Disclaimer:</h5>
+          <p class="mb-0">The author of this tool is not responsible for any errors or omissions, or for the results obtained from the use of this tool. All outputs are provided "as is", with no guarantee of completeness, accuracy, or of the results obtained from the use of this tool, and without warranty of any kind. The output from this tool is provided with the understanding that the author is not herein engaged in rendering legal, accounting, tax, or other professional advice and services.</p>
+        </div>
+      </div>
+      <div class="privacy mb-3">
+        <div class="alert alert-info">
+          <h5><i class="fas fa-shield-alt me-2"></i>Privacy:</h5>
+          <p class="mb-0">The CSV parsing and PDF filling operations occur in your web browser. Your CSV data does not leave your computer.</p>
+        </div>
+      </div>
+      <div class="text-center mb-3">
+        <a href="https://github.com/ardislu/fill-8949-with-csv" class="github-link">
+          <i class="fab fa-github"></i> View this tool's source code on GitHub
+        </a>
+      </div>
+    </div>
 
-  <main class="card">
-    <p class="directions"><b>Directions:</b>
-    <ol>
-      <li>Download two copies of the CSV template (<a id="template-link" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" alt="">
-            <path d="M12 17V3" />
-            <path d="m6 11 6 6 6-6" />
-            <path d="M19 21H5" />
-          </svg>template.csv</a>).</li>
-      <li>Fill the templates with data to populate the tables on page 1 (short-term transactions) and page 2 (long-term transactions) of <a href="https://www.irs.gov/form8949">IRS Form 8949</a>.</li>
-      <li>Select the filled CSV templates in the file pickers below.</li>
-      <li>Click "Download Filled Form 8949" to download a copy of Form 8949 with the CSV data filled into it.</li>
-    </ol>
-    </p>
-    <form>
-      <label for="year">Tax year</label>
-      <select id="year" name="year">
-        <option value="2024">2024</option>
-        <option value="2023">2023</option>
-        <option value="2022">2022</option>
-        <option value="2021">2021</option>
-        <option value="2020">2020</option>
-        <option value="2019">2019</option>
-        <option value="2018">2018</option>
-        <option value="2017">2017</option>
-        <option value="2016">2016</option>
-        <option value="2015">2015</option>
-        <option value="2014">2014</option>
-        <option value="2013">2013</option>
-      </select>
-
-      <label for="short">Short-term transactions</label>
-      <input type="file" id="short" name="short" accept="text/csv" required>
-
-      <label for="long">Long-term transactions</label>
-      <input type="file" id="long" name="long" accept="text/csv" required>
-
-      <div class="inline-container">
-        <input type="checkbox" id="headers" name="headers" checked>
-        <label for="headers">Data has headers</label>
+    <div class="app-card">
+      <div class="directions mb-4">
+        <h5><i class="fas fa-info-circle me-2"></i>Directions:</h5>
+        <ol>
+          <li>Download two copies of the CSV template (<a id="template-link" href="#" class="template-link"><i class="fas fa-download me-1"></i>template.csv</a>).</li>
+          <li>Fill the templates with data to populate the tables on page 1 (short-term transactions) and page 2 (long-term transactions) of <a href="https://www.irs.gov/form8949" class="template-link" target="_blank">IRS Form 8949 <i class="fas fa-external-link-alt ms-1 fa-xs"></i></a>.</li>
+          <li>Select the filled CSV templates in the file pickers below.</li>
+          <li>Click "Download Filled Form 8949" to download a copy of Form 8949 with the CSV data filled into it.</li>
+        </ol>
       </div>
 
-      <div class="inline-container">
-        <button>Download Filled Form 8949</button>
-        <span class="inline-spinner"></span>
-      </div>
-    </form>
-  </main>
+      <form>
+        <div class="mb-3">
+          <label for="year" class="form-label">Tax year</label>
+          <select id="year" name="year" class="form-select">
+            <option value="2024">2024</option>
+            <option value="2023">2023</option>
+            <option value="2022">2022</option>
+            <option value="2021">2021</option>
+            <option value="2020">2020</option>
+            <option value="2019">2019</option>
+            <option value="2018">2018</option>
+            <option value="2017">2017</option>
+            <option value="2016">2016</option>
+            <option value="2015">2015</option>
+            <option value="2014">2014</option>
+            <option value="2013">2013</option>
+          </select>
+        </div>
 
+        <div class="mb-3">
+          <label for="short" class="form-label">Short-term transactions</label>
+          <div class="file-upload">
+            <label for="short" class="file-upload-label">
+              <i class="fas fa-file-csv me-2"></i> Choose short-term CSV file
+              <div id="short-file-name" class="file-name">No file chosen</div>
+            </label>
+            <input type="file" id="short" name="short" accept="text/csv" required>
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <label for="long" class="form-label">Long-term transactions</label>
+          <div class="file-upload">
+            <label for="long" class="file-upload-label">
+              <i class="fas fa-file-csv me-2"></i> Choose long-term CSV file
+              <div id="long-file-name" class="file-name">No file chosen</div>
+            </label>
+            <input type="file" id="long" name="long" accept="text/csv" required>
+          </div>
+        </div>
+
+        <div class="mb-4">
+          <div class="form-check">
+            <input type="checkbox" id="headers" name="headers" class="form-check-input" checked>
+            <label for="headers" class="form-check-label">Data has headers</label>
+          </div>
+        </div>
+
+        <div class="d-grid">
+          <button type="submit" class="btn btn-primary btn-lg">
+            <i class="fas fa-file-download me-2"></i> Download Filled Form 8949
+            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <footer>
+    <div class="container">
+      <p>&copy; 2024 Fill IRS Form 8949 with CSV</p>
+    </div>
+  </footer>
+
+  <!-- Bootstrap JS Bundle with Popper -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  
   <script type="module">
     import Papa from 'https://cdn.jsdelivr.net/npm/papaparse@5.4.1/+esm';
-    import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString, PDFBool } from 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm'; // Added PDFBool
+    import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString, PDFBool } from 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm';
 
     const button = document.querySelector('button');
-    const spinner = document.querySelector('span.inline-spinner');
+    const spinner = document.querySelector('.spinner-border');
+    const shortFileInput = document.getElementById('short');
+    const longFileInput = document.getElementById('long');
+    const shortFileName = document.getElementById('short-file-name');
+    const longFileName = document.getElementById('long-file-name');
+
+    // Update file name display when files are selected
+    shortFileInput.addEventListener('change', function() {
+      shortFileName.textContent = this.files.length > 0 ? this.files[0].name : 'No file chosen';
+    });
+
+    longFileInput.addEventListener('change', function() {
+      longFileName.textContent = this.files.length > 0 ? this.files[0].name : 'No file chosen';
+    });
 
     // Use a custom id generator instead of crypto.randomUUID() to reduce PDF file size
     const annotationIds = (function* () {
@@ -567,8 +776,3 @@
           e.target.removeAttribute('data-submitting');
           button.disabled = false; // Re-enable button
       }
-    });
-  </script>
-</body>
-
-</html>
