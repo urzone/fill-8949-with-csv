@@ -9,7 +9,7 @@
   <meta property="og:description" content="Web app that fills IRS Form 8949 with data from a CSV file.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://form8949.urz.one/">
-
+  
   <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/+esm">
   <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm">
   <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/tslib@1.14.1/+esm">
@@ -18,7 +18,6 @@
   <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/@pdf-lib/upng@1.0.1/+esm">
   <title>Fill IRS Form 8949 with CSV</title>
   <style>
-    /* CSS Styles remain the same as provided previously */
     :root {
       --primary: #1a4d7c;
       --primary-light: #2975b9;
@@ -197,24 +196,13 @@
       background-color: #e2e6ea;
     }
 
-    .checkbox-group, .radio-group {
+    .checkbox-group {
       display: flex;
       align-items: center;
       margin-bottom: 1.5rem;
     }
 
-    .radio-group {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 0.5rem;
-    }
-
-    .radio-option {
-      display: flex;
-      align-items: center;
-    }
-
-    input[type="checkbox"], input[type="radio"] {
+    input[type="checkbox"] {
       margin-right: 0.5rem;
       width: 1.25rem;
       height: 1.25rem;
@@ -329,15 +317,15 @@
       body {
         padding: 1rem;
       }
-
+      
       .card, .form-container {
         padding: 1.5rem;
       }
-
+      
       h1 {
         font-size: 2rem;
       }
-
+      
       .step {
         padding-left: 2.5rem;
       }
@@ -430,20 +418,6 @@
           <label for="headers">CSV data has headers</label>
         </div>
 
-        <div class="form-group">
-          <label>Output Format</label>
-          <div class="radio-group">
-            <div class="radio-option">
-              <input type="radio" id="format-form" name="format" value="form" checked>
-              <label for="format-form">Form with Fields (Editable)</label>
-            </div>
-            <div class="radio-option">
-              <input type="radio" id="format-static" name="format" value="static">
-              <label for="format-static">Static PDF (Compatible with all viewers)</label>
-            </div>
-          </div>
-        </div>
-
         <div class="button-container">
           <button type="submit">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 8px;">
@@ -468,350 +442,148 @@
     </div>
 
     <footer>
-      <p>&copy; 2025 IRS Form 8949 Filler Tool</p> <!-- Note: Year might need update -->
+      <p>&copy; 2025 IRS Form 8949 Filler Tool</p>
     </footer>
   </div>
 
   <script type="module">
     import Papa from 'https://cdn.jsdelivr.net/npm/papaparse@5.4.1/+esm';
-    // Import necessary classes from pdf-lib
-    import { PDFDocument, PDFName } from 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm';
+    import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString } from 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm';
 
-    // Get references to DOM elements
     const button = document.querySelector('button');
     const spinner = document.querySelector('.spinner');
-    const formElement = document.querySelector('form'); // Reference the form element
 
-    // --- Page Filling Logic (Currently using incorrect names) ---
-    // !!! THIS FUNCTION WILL BE UPDATED AFTER DIAGNOSTIC STEP !!!
-    async function fillPageData(page, data, termType) {
-       const form = page.doc.getForm();
-        if (!form) {
-           console.error('Cannot fill data: Form object not found on page associated with the final document.');
-           return;
+    // Use a custom id generator instead of crypto.randomUUID() to reduce PDF file size
+    const annotationIds = (function* () {
+      let i = 0;
+      while (true) {
+        yield `f${i}`; // Must be unique within the PDF
+        i++;
+      }
+    })();
+
+    // Duplicate all annotations exactly, except for the "T" key. The "T" key ("text label") is used
+    // as a unique identifier for the annotation and must be updated or else all annotations with
+    // the same "T" key will have the same value.
+    // Original code from: https://github.com/Hopding/pdf-lib/issues/151
+    function cloneAnnotations(page) {
+      const form = page.doc.catalog.lookup(PDFName.of('AcroForm'), PDFDict);
+      const fields = form.lookup(PDFName.of('Fields'), PDFArray);
+      const annotations = page.node.Annots();
+      for (let i = 0; i < annotations.size(); i++) {
+        const a = annotations.lookup(i, PDFDict);
+        a.set(PDFName.of('T'), PDFString.of(annotationIds.next().value));
+        fields.push(a);
+      }
+    };
+
+    async function generatePage(f8949, data, type) {
+      const [page] = type === 'short' ? await f8949.copyPages(f8949, [0]) : await f8949.copyPages(f8949, [1]);
+      cloneAnnotations(page);
+
+      let cellNumber = 0;
+      const offset = 5; // To skip to the table annotations
+      const annots = page.node.Annots();
+      for (const row of data) {
+        for (const cell of row) {
+          const a = annots.lookup(cellNumber + offset, PDFDict);
+          a.set(PDFName.of('V'), PDFString.of(cell));
+          cellNumber++;
         }
-
-       const rowsPerPage = 14;
-       const fieldsPerRow = 8;
-
-        // --- INCORRECT PATTERN - TO BE REPLACED ---
-       const pageNum = (termType === 'short') ? 1 : 2;
-       const fieldBase = (termType === 'short') ? 'f1' : 'f2';
-       const basePath = `topmostSubform[0].Page${pageNum}[0].Table_Line1[0].`;
-       const initialIndices = [3, 4, 5, 6, 7, 8, 9, 10]; // Assumed indices - Likely wrong
-       // --- END INCORRECT PATTERN ---
-
-       console.log(`Attempting to fill data for ${termType} using CURRENTLY INCORRECT pattern: ${basePath}...`);
-
-       for (let r = 0; r < data.length && r < rowsPerPage; r++) {
-           const rowData = data[r];
-           const rowNum = r + 1;
-
-           for (let c = 0; c < rowData.length && c < fieldsPerRow; c++) {
-               const cellValue = String(rowData[c] || '');
-
-               if (c >= initialIndices.length) {
-                   console.warn(`[Row ${rowNum}] Skipping column index ${c} - no initial index defined.`);
-                   continue;
-               }
-
-               const initialIndex = initialIndices[c];
-               if (typeof initialIndex !== 'number') {
-                   console.warn(`[Row ${rowNum}, Col ${c}] Invalid initial index: ${initialIndex}`);
-                   continue;
-               }
-               const calculatedIndex = initialIndex + (r * 8);
-               const fieldName = `${basePath}Row${rowNum}[0].${fieldBase}_${calculatedIndex}[0]`; // INCORRECT NAME GENERATION
-
-               try {
-                   const field = form.getTextField(fieldName);
-                   field.setText(cellValue);
-               } catch (e) {
-                   // This error is expected until the correct names are used
-                   console.warn(`!! FAILED to find/set field (using incorrect name): "${fieldName}". Check PDF template pattern. Error: ${e.message}`);
-               }
-           }
-       }
-        console.log(`Finished attempting fill for ${termType} (using incorrect names).`);
-   }
-
-    // --- Main PDF Generation Logic (generate8949) ---
-    // Generates the final PDF AND includes diagnostic code to list fields
-    async function generate8949(f8949Bytes, year, shortData, longData, isStatic = false) {
-       const sourceDoc = await PDFDocument.load(f8949Bytes);
-
-       // --- BEGIN DIAGNOSTIC BLOCK ---
-       // This block lists all detectable form fields in the loaded template.
-       console.log("--- DIAGNOSTIC: Listing Fields from Template PDF ---");
-       try {
-           const form = sourceDoc.getForm();
-           if (form) {
-               const fields = form.getFields();
-               console.log(`[DIAGNOSTIC] Found ${fields.length} fields in the template:`);
-               fields.forEach(field => {
-                   try {
-                        // Attempt to get type and name safely
-                       const type = field.constructor.name; // e.g., PDFTextField, PDFCheckBox
-                       const name = field.getName();      // The crucial field name!
-                       console.log(`  [DIAGNOSTIC] - Name: "${name}", Type: ${type}`);
-                   } catch (fieldError) {
-                       console.warn(`  [DIAGNOSTIC] - Error reading field properties: ${fieldError.message}`, field);
-                   }
-               });
-                // Optional: List all fields from AcroForm dictionary (more raw)
-                // const acroForm = form.acroForm;
-                // if (acroForm && acroForm.dict.has(PDFName.of('Fields'))) {
-                //     const fieldArray = acroForm.dict.lookup(PDFName.of('Fields'), PDFArray);
-                //     console.log(`[DIAGNOSTIC] Raw AcroForm fields array size: ${fieldArray.size()}`);
-                //     // Further inspection could iterate through fieldArray elements if needed
-                // }
-
-           } else {
-               console.log("[DIAGNOSTIC] Template does not contain a form according to pdf-lib.");
-           }
-       } catch (e) {
-           console.error("[DIAGNOSTIC] Error trying to list fields:", e);
-       }
-       console.log("--- END DIAGNOSTIC ---");
-       // --- END DIAGNOSTIC BLOCK ---
-
-       const finalDoc = await PDFDocument.create(); // Create the target document we'll build
-       const chunkSize = 14; // Assumed rows per page in the template
-
-       // Process Short-Term Data
-       console.log(`Processing ${shortData.length} short-term rows...`);
-       if (shortData.length > 0) {
-           for (let i = 0; i < shortData.length; i += chunkSize) {
-               const chunk = shortData.slice(i, i + chunkSize);
-               console.log(`   Copying short-term template page (index 0) for rows ${i+1}-${Math.min(i+chunkSize, shortData.length)}`);
-               const [copiedPage] = await finalDoc.copyPages(sourceDoc, [0]); // Copy template page 0
-               finalDoc.addPage(copiedPage);
-               // Fill data for 'short' term - EXPECT ERRORS HERE until names fixed
-               await fillPageData(copiedPage, chunk, 'short');
-           }
-       } else {
-           // Add a blank short-term page if no data
-           console.log("No short-term data, adding blank template page (index 0).");
-           const [copiedPage] = await finalDoc.copyPages(sourceDoc, [0]);
-           finalDoc.addPage(copiedPage);
-       }
-
-       // Process Long-Term Data
-       console.log(`Processing ${longData.length} long-term rows...`);
-       if (longData.length > 0) {
-           for (let i = 0; i < longData.length; i += chunkSize) {
-               const chunk = longData.slice(i, i + chunkSize);
-               console.log(`   Copying long-term template page (index 1) for rows ${i+1}-${Math.min(i+chunkSize, longData.length)}`);
-               const [copiedPage] = await finalDoc.copyPages(sourceDoc, [1]); // Copy template page 1
-               finalDoc.addPage(copiedPage);
-               // Fill data for 'long' term - EXPECT ERRORS HERE until names fixed
-               await fillPageData(copiedPage, chunk, 'long');
-           }
-       } else {
-           // Add a blank long-term page if no data
-           console.log("No long-term data, adding blank template page (index 1).");
-           const [copiedPage] = await finalDoc.copyPages(sourceDoc, [1]);
-           finalDoc.addPage(copiedPage);
-       }
-
-      // --- Flatten if Static PDF is requested ---
-      if (isStatic) {
-        console.log("Flattening PDF...");
-        try {
-            const form = finalDoc.getForm();
-            if (form) {
-                 // Ensure appearances generated before flattening
-                 try {
-                    form.updateFieldAppearances();
-                 } catch (updateError) {
-                     console.warn("Warning: Error updating field appearances before flattening. Flattening may use default appearances.", updateError);
-                 }
-                 // Flatten, preventing another appearance update
-                 form.flatten({ updateFieldAppearances: false });
-                 console.log("Flattening complete.");
-             } else {
-                 console.warn("No form found in the document to flatten.");
-             }
-        } catch (flattenError) {
-             console.error("Error during flattening:", flattenError);
-             alert(`Warning: Could not flatten the PDF. The downloaded file might still be editable or incomplete. Error: ${flattenError.message}`);
-        }
-      } else {
-          // --- NeedAppearances Flag for Fillable PDF ---
-          try {
-              const form = finalDoc.getForm();
-              if(form && form.acroForm) {
-                  form.acroForm.dict.set(PDFName.of('NeedAppearances'), finalDoc.context.obj(true));
-                   // Optionally update appearances here too? Test if necessary for fillable forms.
-                   // try { form.updateFieldAppearances(); } catch (uae) { console.warn('Error updating fillable appearances', uae); }
-              } else if (form) {
-                  console.warn("Form exists, but AcroForm dictionary not found. Cannot set NeedAppearances.")
-              }
-          } catch(e) {
-              console.warn("Could not get form or set NeedAppearances flag.", e);
-          }
       }
 
-      // --- Save Document ---
-      const filename = `f8949_${year}_${isStatic ? 'static' : 'filled'}_DIAGNOSTIC.pdf`; // Added DIAGNOSTIC to name
-      console.log(`Saving PDF as: ${filename}`);
-
-      // Save the final document. Update appearances maybe only needed for fillable, test.
-      return finalDoc.save({ updateFieldAppearances: !isStatic }).then(data =>
-          new File([data.buffer], filename, { type: 'application/pdf' })
-      );
+      return page;
     }
 
-    // --- Helper Functions ---
-    // Triggers browser download for a file object
+    async function generate8949(f8949Bytes, year, shortData, longData) {
+      const f8949 = await PDFDocument.load(f8949Bytes);
+      const pagePromises = [];
+      const chunkSize = 14;
+      for (let i = 0; i < shortData.length; i += chunkSize) {
+        const chunk = shortData.slice(i, i + chunkSize);
+        pagePromises.push(generatePage(f8949, chunk, 'short'));
+      }
+      if (shortData.length === 0) { // Push a blank page
+        pagePromises.push(f8949.copyPages(f8949, [0]).then(p => p[0]));
+      }
+      for (let i = 0; i < longData.length; i += chunkSize) {
+        const chunk = longData.slice(i, i + chunkSize);
+        pagePromises.push(generatePage(f8949, chunk, 'long'));
+      }
+      if (longData.length === 0) { // Push a blank page
+        pagePromises.push(f8949.copyPages(f8949, [1]).then(p => p[0]));
+      }
+      const pages = await Promise.all(pagePromises);
+
+      for (const page of pages) {
+        f8949.addPage(page);
+      }
+
+      // Remove the original 2 pages of the PDF
+      f8949.removePage(0);
+      f8949.removePage(0);
+
+      return f8949.save().then(data => new File([data.buffer], `f8949_${year}_filled`, { type: 'application/pdf' }));
+    }
+
     function download(file) {
       const a = document.createElement('a');
       a.href = URL.createObjectURL(file);
       a.download = file.name;
-      document.body.appendChild(a); // Append anchor to body
       a.click();
-      document.body.removeChild(a); // Clean up
-      URL.revokeObjectURL(a.href); // Release object URL
     }
 
-    // Parses a CSV file using PapaParse
     async function parseCsv(file, hasHeaders) {
-      return new Promise((resolve, reject) => {
-        if (!file || !(file instanceof File)) {
-           return reject(new Error("Invalid file provided for parsing."));
-        }
+      const csv = await new Promise((resolve, reject) => {
         Papa.parse(file, {
-          header: false, // We handle headers manually if present
+          header: false,
           skipEmptyLines: 'greedy',
-          complete: (results) => {
-              if (results.errors && results.errors.length > 0) {
-                 console.error("CSV Parsing Errors:", results.errors);
-                 // Report first error found
-                 const firstError = results.errors[0];
-                 return reject(new Error(`CSV Parsing Error (${firstError.code}): ${firstError.message} on row ${firstError.row + (hasHeaders ? 2 : 1)}`)); // Adjust row number based on header
-              }
-              let data = results.data;
-              if (hasHeaders && data.length > 0) {
-                data.shift(); // Remove header row
-              }
-              // Standardize row length (ensure 8 columns) and filter empty rows
-              const expectedColumns = 8;
-              const standardizedData = data
-                 .filter(row => Array.isArray(row) && row.some(cell => cell !== null && cell !== undefined && String(cell).trim() !== '')) // Filter out functionally empty rows
-                 .map(row => {
-                    const newRow = [...row];
-                    while (newRow.length < expectedColumns) {
-                        newRow.push(''); // Pad with empty strings
-                    }
-                    return newRow.slice(0, expectedColumns); // Truncate if too long
-               });
-              resolve(standardizedData);
-          },
-          error: (error) => {
-              console.error("PapaParse Error:", error);
-              reject(error);
-          }
+          complete: resolve,
+          error: reject
         });
       });
+
+      const data = csv.data;
+      if (hasHeaders) {
+        data.shift();
+      }
+      return data;
     }
 
-    // --- Event Listeners ---
-    // Template Download Link
     document.querySelector('#template-link').addEventListener('click', e => {
       e.preventDefault();
-      const csv = '"Description of property","Date acquired","Date sold or disposed of","Proceeds (sales price)","Cost or other basis","Code(s) from instructions","Amount of adjustment","Gain or (loss)"';
+      const csv = 'Description of property,Date acquired,Date sold or disposed of,Proceeds (sales price),Cost or other basis,Code(s) from instructions,Amount of adjustment,Gain or (loss)';
       const encoded = new TextEncoder().encode(csv);
-      const file = new File([encoded], 'template.csv', { type: 'text/csv;charset=utf-8' });
+      const file = new File([encoded], 'template.csv', { type: 'text/csv' });
       download(file);
     });
 
-    // Form Submission Handler
-    formElement.addEventListener('submit', async (e) => {
-      e.preventDefault(); // Prevent default form submission
+    document.querySelector('form').addEventListener('submit', async e => {
+      e.preventDefault();
 
-      // Prevent multiple submissions
-      if (formElement.hasAttribute('data-submitting')) {
-        console.log("Submission already in progress.");
+      if (e.target.hasAttribute('data-submitting')) {
         return;
       }
-      formElement.setAttribute('data-submitting', ''); // Set submitting flag
-      spinner.style.display = 'inline-block';          // Show spinner
-      let pdfGenerated = false;                        // Track if generation was successful
+      e.target.setAttribute('data-submitting', '');
+      spinner.style.display = 'inline-block';
 
-      try {
-        const formData = new FormData(formElement);
-        const year = formData.get('year');
-        const shortFile = formData.get('short');
-        const longFile = formData.get('long');
-        const hasHeaders = formData.get('headers') === 'on';
-        const isStatic = formData.get('format') === 'static';
+      const form = new FormData(e.target);
+      const year = form.get('year');
+      const shortFile = form.get('short');
+      const longFile = form.get('long');
+      const hasHeaders = form.get('headers') === 'on';
+      const [f8949Bytes, shortData, longData] = await Promise.all([
+        fetch(`/forms/f8949--${year}.pdf`).then(r => r.arrayBuffer()),
+        parseCsv(shortFile, hasHeaders),
+        parseCsv(longFile, hasHeaders)
+      ]);
 
-        // --- Basic File Validation ---
-        let fileError = null;
-         if (!shortFile || shortFile.size === 0) fileError = 'Please select the short-term CSV file.';
-         if (!longFile || longFile.size === 0) fileError = (fileError ? fileError + '\nPlease also select the long-term CSV file.' : 'Please select the long-term CSV file.');
-         if (fileError) throw new Error(fileError);
+      await generate8949(f8949Bytes, year, shortData, longData).then(download);
 
-        // --- Parse CSV Data ---
-        console.log('Parsing CSV files...');
-        const [shortData, longData] = await Promise.all([
-          parseCsv(shortFile, hasHeaders),
-          parseCsv(longFile, hasHeaders)
-        ]);
-        console.log(`Parsed ${shortData.length} short-term rows, ${longData.length} long-term rows.`);
-        if (shortData.length === 0 && longData.length === 0) {
-            console.warn("Both CSV files resulted in zero data rows after parsing. Check CSV content and header row setting.");
-             // Allow proceeding to generate potentially blank form + diagnostics
-             // alert("Warning: Both CSV files appear to be empty or contain only headers. Proceeding anyway.");
-        }
-
-        // --- Fetch the Correct PDF Template ---
-        const templateUrl = `./forms/f8949--${year}.pdf`;
-        console.log(`Fetching template: ${templateUrl}`);
-        const response = await fetch(templateUrl);
-        console.log(`Fetch response status: ${response.status}`);
-         if (!response.ok || response.headers.get('content-type')?.toLowerCase().indexOf('application/pdf') === -1) {
-             let errorDetail = `Status: ${response.status} ${response.statusText}`;
-             try {
-                 const text = await response.text();
-                 errorDetail += `. Response preview: ${text.substring(0, 200)}`; // Show beginning of non-PDF response
-             } catch { /* ignored */ }
-             console.error(`Failed to fetch valid PDF template. ${errorDetail}`);
-             throw new Error(`Failed to fetch PDF template for year ${year}. Check if '${templateUrl}' exists and is accessible. ${errorDetail}`);
-         }
-        const f8949Bytes = await response.arrayBuffer();
-        console.log(`Template fetched (${(f8949Bytes.byteLength / 1024).toFixed(1)} KB). Running field diagnostics...`);
-
-        // --- Generate PDF (Fillable or Flattened) ---
-        // This function now includes the diagnostic code to list field names first
-        const finalPdfFile = await generate8949(f8949Bytes, year, shortData, longData, isStatic);
-
-        // --- Download the Result ---
-        if (finalPdfFile instanceof File) {
-            console.log('PDF generation process completed. Downloading:', finalPdfFile.name);
-            download(finalPdfFile);
-            pdfGenerated = true; // Mark success
-        } else {
-            throw new Error('PDF generation process completed but did not return a valid file object.');
-        }
-
-      } catch (error) {
-        console.error('Error during form processing:', error);
-        alert(`An error occurred: ${error.message}\n\nPlease check the browser console (F12) for more details, especially the [DIAGNOSTIC] field list.`);
-        // The diagnostic output should still be in the console, even if parsing/filling failed later
-
-      } finally {
-        console.log('Form processing finished. Cleaning up UI...');
-        spinner.style.display = 'none';                 // Hide spinner
-        formElement.removeAttribute('data-submitting'); // Clear submitting flag
-        if (pdfGenerated) {
-            console.log("PDF download should have initiated.");
-        } else {
-             console.log("PDF generation/download did not complete successfully due to errors. Check console.");
-        }
-      }
+      spinner.style.display = 'none';
+      e.target.removeAttribute('data-submitting');
     });
-
   </script>
 </body>
+
 </html>
