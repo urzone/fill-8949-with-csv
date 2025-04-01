@@ -781,10 +781,11 @@
             console.error('Error fetching PDF template:', fetchError);
             alert(`Error fetching PDF template: ${fetchError.message}. Please try a different year or format.`);
           }
-        } catch (error) {
-          console.error('Error generating PDF:', error);
-          alert('An error occurred while generating the PDF. Please try again.');
         }
+      } catch (error) {
+        console.error('Error generating PDF:', error);
+        alert('An error occurred while generating the PDF. Please try again.');
+      }
 
       spinner.style.display = 'none';
       e.target.removeAttribute('data-submitting');
