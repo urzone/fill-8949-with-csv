@@ -9,7 +9,7 @@
   <meta property="og:description" content="Web app that fills IRS Form 8949 with data from a CSV file.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://form8949.urz.one/">
-  
+
   <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/+esm">
   <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm">
   <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/tslib@1.14.1/+esm">
@@ -317,15 +317,15 @@
       body {
         padding: 1rem;
       }
-      
+
       .card, .form-container {
         padding: 1.5rem;
       }
-      
+
       h1 {
         font-size: 2rem;
       }
-      
+
       .step {
         padding-left: 2.5rem;
       }
@@ -449,27 +449,28 @@
 
   <script type="module">
     import Papa from 'https://cdn.jsdelivr.net/npm/papaparse@5.4.1/+esm';
-    import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString } from 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm';
+    // FIX 1: Added PDFBool to the import
+    import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString, PDFBool } from 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm';
 
     const button = document.querySelector('button');
     const spinner = document.querySelector('.spinner');
 
-    // Use a custom id generator instead of crypto.randomUUID() to reduce PDF file size
     const annotationIds = (function* () {
       let i = 0;
       while (true) {
-        yield `f${i}`; // Must be unique within the PDF
+        yield `f${i}`;
         i++;
       }
     })();
 
-    // Duplicate all annotations exactly, except for the "T" key. The "T" key ("text label") is used
-    // as a unique identifier for the annotation and must be updated or else all annotations with
-    // the same "T" key will have the same value.
-    // Original code from: https://github.com/Hopding/pdf-lib/issues/151
     function cloneAnnotations(page) {
       const form = page.doc.catalog.lookup(PDFName.of('AcroForm'), PDFDict);
       const fields = form.lookup(PDFName.of('Fields'), PDFArray);
+
+      // FIX 2: Added NeedAppearances flag so PDF viewers regenerate
+      // appearance streams and actually display the filled values
+      form.set(PDFName.of('NeedAppearances'), PDFBool.True);
+
       const annotations = page.node.Annots();
       for (let i = 0; i < annotations.size(); i++) {
         const a = annotations.lookup(i, PDFDict);
@@ -478,12 +479,12 @@
       }
     };
 
-    async function generatePage(f8949, data, type) {
+    // FIX 3: Accept offset as a parameter instead of hardcoding
+    async function generatePage(f8949, data, type, offset) {
       const [page] = type === 'short' ? await f8949.copyPages(f8949, [0]) : await f8949.copyPages(f8949, [1]);
       cloneAnnotations(page);
 
       let cellNumber = 0;
-      const offset = 5; // To skip to the table annotations
       const annots = page.node.Annots();
       for (const row of data) {
         for (const cell of row) {
@@ -492,26 +493,29 @@
           cellNumber++;
         }
       }
-
       return page;
     }
 
     async function generate8949(f8949Bytes, year, shortData, longData) {
       const f8949 = await PDFDocument.load(f8949Bytes);
       const pagePromises = [];
-      const chunkSize = 14;
+
+      // FIX 3: Dynamically compute chunkSize and offset based on tax year
+      const chunkSize = Number(year) >= 2025 ? 11 : 14;
+      const offset = Number(year) >= 2025 ? 8 : 5;
+
       for (let i = 0; i < shortData.length; i += chunkSize) {
         const chunk = shortData.slice(i, i + chunkSize);
-        pagePromises.push(generatePage(f8949, chunk, 'short'));
+        pagePromises.push(generatePage(f8949, chunk, 'short', offset));
       }
-      if (shortData.length === 0) { // Push a blank page
+      if (shortData.length === 0) {
         pagePromises.push(f8949.copyPages(f8949, [0]).then(p => p[0]));
       }
       for (let i = 0; i < longData.length; i += chunkSize) {
         const chunk = longData.slice(i, i + chunkSize);
-        pagePromises.push(generatePage(f8949, chunk, 'long'));
+        pagePromises.push(generatePage(f8949, chunk, 'long', offset));
       }
-      if (longData.length === 0) { // Push a blank page
+      if (longData.length === 0) {
         pagePromises.push(f8949.copyPages(f8949, [1]).then(p => p[0]));
       }
       const pages = await Promise.all(pagePromises);
@@ -520,7 +524,6 @@
         f8949.addPage(page);
       }
 
-      // Remove the original 2 pages of the PDF
       f8949.removePage(0);
       f8949.removePage(0);
 
@@ -579,7 +582,8 @@
         parseCsv(longFile, hasHeaders)
       ]);
 
-      await generate8949(f8949Bytes, year, shortData, longData).then(download);
+      const file = await generate8949(f8949Bytes, year, shortData, longData);
+      download(file);
 
       spinner.style.display = 'none';
       e.target.removeAttribute('data-submitting');
